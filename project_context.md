@@ -1,128 +1,122 @@
-Project Name
+# 📘 PROJECT_CONTEXT.md
 
-Background Job & Task Processing System
+```md
+# PROJECT_CONTEXT.md
 
-Purpose
+This document captures stable architectural decisions and system behavior.
+It excludes experimentation, debugging history, and implementation noise.
 
-This document is the canonical snapshot of the system.
+---
 
-It captures:
+## Project Purpose
 
-Stable architectural decisions
+The system is designed to demonstrate background job processing beyond simple request–response APIs.
 
-Verified behavior
+Primary goals:
 
-Frozen scope boundaries
+- Decouple job creation from execution
+- Ensure durability of background work
+- Make asynchronous workflows observable
+- Avoid overengineering while preserving correctness
 
-It intentionally excludes:
+---
 
-Debugging history
+## Architecture Decisions
 
-Tooling struggles
+### Producer–Consumer Model
 
-Experiments and dead ends
+- API server acts as a **job producer**
+- Worker process acts as a **job consumer**
+- Redis acts as a durable intermediary
 
-Core Problem Statement
+API and worker lifecycles are fully independent.
 
-HTTP request–response cycles are unsuitable for slow, unreliable, or heavy work.
+---
 
-This system provides a general-purpose background job mechanism where work is:
+## Job Lifecycle (Frozen — Phase 2)
 
-Enqueued quickly
+Jobs have a well-defined lifecycle managed by BullMQ and Redis.
 
-Executed later
+Observed states include:
 
-Isolated from user-facing APIs
+- `waiting`
+- `active`
+- `completed`
+- `failed`
 
-System Scope (Frozen)
-In Scope
+Key decisions:
 
-Job creation via API
+- Job state is sourced directly from BullMQ
+- No custom job-status database is introduced
+- No duplication of job metadata
+- Status access is read-only
 
-Redis-backed job queue
+Jobs may remain in `waiting` state when no workers are running. This behavior is intentional and correct.
 
-Worker-based job execution
+---
 
-Asynchronous processing model
+## Job Status API
 
-Out of Scope
+A single endpoint is exposed for job status:
+GET /jobs/:id/status
 
-Authentication / authorization
 
-UI dashboards
+Design principles:
 
-Horizontal worker scaling strategies
+- One endpoint for all job states
+- No state-specific endpoints
+- No polling strategy enforced by the backend
+- Clients decide how and when to query status
 
-Kubernetes or container orchestration
+This approach aligns with real-world async system design.
 
-Real external integrations (email, storage, etc.)
+---
 
-Architecture Decisions
+## Job Input Contract (Phase 1–2)
 
-Redis chosen as the queue backend
+Jobs are submitted as structured JSON objects with:
 
-BullMQ chosen for job abstraction
+- `type` — identifies the job category
+- `payload` — contains job-specific data and metadata
 
-API and worker run as independent Node.js processes
+Example:
 
-Redis connection provided via environment variables
-
-All decisions are frozen for V1.
-
-Job Definition
-
-A job is defined as:
-
-A unit of work
-
-Created at one point in time
-
-Executed later by a worker
-
-Independent of HTTP lifecycle
-
-Jobs are identified by:
-
-Job ID
-
-Job type (name)
-
-Payload (data)
-
-Execution Model
-
-API acts as job producer
-
-Worker acts as job consumer
-
-Redis acts as durable intermediary
-
-The API never executes job logic.
-
-Failure Philosophy (Early Stage)
-
-Worker crashes must not crash API
-
-Failed jobs must not crash workers
-
-Visibility and retries are handled in later phases
+```json
+{
+  "type": "welcome-email",
+  "payload": {
+    "email": "anoop@example.com",
+    "name": "Anoop",
+    "message": "Congratulations! Your background job system is live."
+  }
+}
 
 Configuration Strategy
 
-All infrastructure configuration is externalized
+All environment-specific configuration is externalized
 
-No secrets or endpoints are hardcoded
+Redis connection details are provided via REDIS_URL
 
-Environment variables are mandatory
+.env is used for local development convenience
 
-Status
+process.env is the runtime source of truth
 
-Phase 1 complete. System verified end-to-end:
+No credentials are committed to version control.
 
-Job creation
+Tooling Decisions
 
-Queue persistence
+Postman is used during development to simulate realistic client requests
 
-Worker execution
+curl is not a required part of the system design anymore
 
-Future phases build incrementally on this foundation.
+Developer tooling (nodemon, concurrently) improves workflow without altering architecture
+
+Version Status
+
+Phase 2 complete
+
+Job lifecycle is observable
+
+Background processing is durable and decoupled
+
+Subsequent phases will extend reliability (retries, backoff, failure handling) without altering these foundations.

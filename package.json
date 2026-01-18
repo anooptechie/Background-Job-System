@@ -2,9 +2,13 @@
   "name": "background-jobs-system",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "api/app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start:server": "node -r dotenv/config api/app.js",
+    "start:worker": "node -r dotenv/config worker/worker.js",
+    "dev:server": "nodemon -r dotenv/config api/app.js",
+    "dev:worker": "nodemon -r dotenv/config worker/worker.js",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:worker\""
   },
   "keywords": [],
   "author": "",
@@ -12,7 +16,12 @@
   "type": "commonjs",
   "dependencies": {
     "bullmq": "^5.66.5",
+    "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "ioredis": "^5.9.2"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.11"
   }
 }

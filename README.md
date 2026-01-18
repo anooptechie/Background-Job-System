@@ -1,132 +1,123 @@
-Background Job & Task Processing System
-Purpose
+# Background Job & Task Processing System
 
-This project demonstrates how to design and implement asynchronous background job processing outside the HTTP request–response cycle. The system allows clients to enqueue work, while independent workers execute that work later with reliability and isolation.
+This project demonstrates how to design and build a background job processing system that works outside the HTTP request–response lifecycle.
 
-The goal is to learn infrastructure-grade backend patterns, not to build a user-facing product.
+The system allows jobs to be created via an API, queued reliably using Redis, and processed asynchronously by independent worker processes.
 
-What This System Does
+---
 
-Accepts job creation requests via an API
+## Core Capabilities
 
-Persists jobs in a Redis-backed queue
+- Asynchronous job execution
+- Durable job queuing using Redis
+- Independent API and worker processes
+- Observable job lifecycle with status tracking
+- Clean separation of concerns (producer vs consumer)
 
-Executes jobs asynchronously using worker processes
+---
 
-Decouples slow or unreliable work from HTTP requests
+## Tech Stack
 
-What This System Intentionally Avoids
+- Node.js
+- Express.js
+- BullMQ
+- Redis (managed Redis via Upstash during development)
+- ioredis
+- dotenv
+- nodemon
+- concurrently
 
-To prevent overengineering and burnout, the following are explicitly excluded:
+---
 
-UI dashboards
+## Architecture Overview
 
-Kubernetes or container orchestration
+- **API Server**  
+  Acts as a job producer. Accepts job requests and enqueues them.
 
-Real email providers
+- **Redis Queue**  
+  Serves as a durable intermediary between API and workers.
 
-File uploads or storage
+- **Worker Process**  
+  Consumes jobs from the queue and executes them asynchronously.
 
-Authentication and authorization
+API availability and worker availability are fully decoupled.
 
-WebSockets or real-time UIs
+---
 
-Multi-language workers
+## Job Submission
 
-This is a depth-over-breadth project.
+Jobs are submitted via `POST /jobs` as structured JSON payloads.
 
-Architecture Overview
-Client
-  |
-  | POST /jobs
-  v
-API Server (Producer)
-  |
-  | enqueue job
-  v
-Redis Queue (BullMQ)
-  |
-  | fetch job
-  v
-Worker Process (Consumer)
-  |
-  | execute job
-  v
-Job Completed
+During development, **Postman** is used as the primary client to simulate real application requests.
 
-Key Properties
+### Example Request Body
 
-API and workers are separate processes
+```json
+{
+  "type": "welcome-email",
+  "payload": {
+    "email": "Albert@example.com",
+    "name": "Albert",
+    "message": "Congratulations! Your background job system is live."
+  }
+}
 
-API never executes background work
+Example Response
+json
+Copy code
+{
+  "status": "accepted",
+  "jobId": "15"
+}
+The API responds immediately. Job execution happens asynchronously.
 
-Workers operate independently of HTTP requests
+Job Lifecycle & Status Tracking (Phase 2)
 
-Redis is the coordination and persistence layer
+Each job has an observable lifecycle managed internally by BullMQ.
 
-Job Lifecycle (Phase 1)
+Job States
 
-Client submits a job request
+waiting — job is queued but no worker is processing it yet
 
-API validates input and enqueues the job
+active — job is currently being processed
 
-API responds immediately with 202 Accepted
+completed — job finished successfully
 
-Worker pulls the job from Redis
+failed — job execution failed
 
-Worker executes the job asynchronously
+Jobs can remain in the waiting state even if no worker is running.
 
-Supported Job Types (Initial)
+Job Status API
 
-email — simulated email send (console log)
+The system exposes a read-only endpoint to query job status:
 
-report — simulated long-running task
+GET /jobs/:id/status
 
-dummy — used for testing retries and failures
+Example Response
+{
+  "jobId": "15",
+  "type": "welcome-email",
+  "state": "waiting",
+  "createdAt": "2026-01-18T10:12:30.000Z",
+  "processedAt": null,
+  "failedReason": null
+}
 
-These job types exist to exercise system behavior, not business logic.
+This confirms that job creation and job execution are fully decoupled.
 
-Tech Stack
+Configuration
 
-Node.js
+All infrastructure configuration is externalized.
 
-Express.js
-
-BullMQ
-
-Redis (managed Redis via Upstash during development)
-
-ioredis
-
-Running the Project (Local)
-Prerequisites
-
-Node.js
-
-Redis-compatible endpoint (managed or local)
-
-Environment Variable
-
-The application requires a Redis connection string:
-
+Environment Variables
 REDIS_URL=<redis connection url>
 
-This is read from process.env and is not hardcoded.
 
-Project Status
+During local development, this value is stored in a .env file and loaded using dotenv.
 
-Phase 0: Design & Scope — Complete
+No credentials are hardcoded or committed to version control.
 
-Phase 1: Core Job Queue — Complete
+Running the Project
 
-Phase 2+: Planned
+See STARTUP.md for detailed startup instructions.
 
-Learning Outcomes
-
-Designed async systems beyond request–response
-
-Implemented background job queues and workers
-
-Understood worker isolation and failure boundaries
-
-Built infrastructure-style backend components

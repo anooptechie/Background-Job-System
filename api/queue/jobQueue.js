@@ -5,4 +5,15 @@ const jobQueue = new Queue("jobs-queue", {
   connection,
 });
 
-module.exports = jobQueue;
+//
+async function addJob(type, payload) {
+  const job = await jobQueue.add(type, payload);
+  return job;
+}
+
+async function getJobById(jobId) {
+  const job = await jobQueue.getJob(jobId);
+  return job;
+}
+
+module.exports = { jobQueue, addJob, getJobById };
