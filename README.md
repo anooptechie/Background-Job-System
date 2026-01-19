@@ -105,6 +105,31 @@ Example Response
 
 This confirms that job creation and job execution are fully decoupled.
 
+## Failure Handling, Retries & Backoff (Phase 3)
+
+The system is designed to handle failures without crashing workers or blocking other jobs.
+
+### Failure Handling
+- Job execution errors are thrown inside the worker
+- Failed jobs do not crash the worker process
+- Failure reasons are recorded and exposed via the status API
+
+### Automatic Retries
+- Jobs are retried automatically when execution fails
+- Retry behavior is configured at job creation time
+- Retries are limited to a fixed number of attempts
+
+### Backoff Strategy
+- A fixed delay is applied between retries
+- This prevents retry storms and reduces pressure on external dependencies
+
+### Dead-Letter Behavior
+- After all retry attempts are exhausted, jobs stop retrying
+- Failed jobs remain stored in Redis and are fully inspectable
+- Workers continue processing other jobs without interruption
+
+This approach ensures resilience while keeping the worker logic simple and predictable.
+
 Configuration
 
 All infrastructure configuration is externalized.

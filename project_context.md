@@ -119,4 +119,27 @@ Job lifecycle is observable
 
 Background processing is durable and decoupled
 
-Subsequent phases will extend reliability (retries, backoff, failure handling) without altering these foundations.
+## Failure Handling & Reliability (Phase 3)
+
+The system is designed to tolerate and isolate job failures without compromising overall stability.
+
+### Failure Model
+- Job failures are signaled by throwing errors in the worker
+- Workers are not responsible for retry logic
+- A failed job does not affect other jobs or worker availability
+
+### Retry Strategy
+- Retries are configured at job creation time
+- A fixed maximum number of retry attempts is enforced
+- Retry execution is managed entirely by BullMQ
+
+### Backoff Policy
+- A fixed backoff delay is applied between retries
+- This prevents immediate retry loops and retry storms
+
+### Dead-Letter Behavior
+- Jobs that exhaust all retry attempts transition to a terminal `failed` state
+- Failed jobs remain stored and queryable
+- No infinite retry loops are possible
+
+These behaviors are considered stable and form the reliability foundation for future phases.

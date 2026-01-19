@@ -7,7 +7,10 @@ const jobQueue = new Queue("jobs-queue", {
 
 //
 async function addJob(type, payload) {
-  const job = await jobQueue.add(type, payload);
+  const job = await jobQueue.add(type, payload, {
+    attempts: 3,
+    backoff: { type: "fixed", delay: 10000 },
+  });
   return job;
 }
 

@@ -9,6 +9,11 @@ const worker = new Worker(
     console.log("Job Type", job.name);
     console.log("Job Data", job.data);
 
+    // 🔴 Phase 3.1: intentional failure
+    if (job.name === "welcome-email") {
+      throw new Error("Simulated email service failure");
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     console.log("Job Completed", job.id);
