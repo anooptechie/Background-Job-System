@@ -130,13 +130,40 @@ The system is designed to handle failures without crashing workers or blocking o
 
 This approach ensures resilience while keeping the worker logic simple and predictable.
 
+## Idempotency & Safety (Phase 4)
+
+This system guarantees safe background job processing under retries,
+crashes, and duplicate requests.
+
+### Idempotent Job Creation
+- Clients must provide an `idempotencyKey` for every job
+- Duplicate requests with the same key result in a single job
+- Idempotency keys are hashed to generate Redis/BullMQ-safe job IDs
+- Internal job IDs are never reused as client idempotency keys
+
+### Retry-Safe Side Effects
+- Side effects are protected using a Redis reservation pattern (`SET NX`)
+- Side effects execute at most once, even if a worker crashes
+- Retries stop as soon as a job successfully completes
+- Failed jobs are retried up to a fixed limit and then dead-lettered
+
+### Observability Guarantees
+- Job states (`waiting`, `active`, `completed`, `failed`) accurately reflect execution
+- Worker logs distinguish between:
+  - normal success
+  - recovery success after retries
+
+### Design Principle
+> Idempotency expresses intent.  
+> Job IDs enforce safety.  
+> Side effects must be protected before execution.
+
 Configuration
 
 All infrastructure configuration is externalized.
 
 Environment Variables
 REDIS_URL=<redis connection url>
-
 
 During local development, this value is stored in a .env file and loaded using dotenv.
 

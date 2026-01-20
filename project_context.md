@@ -143,3 +143,27 @@ The system is designed to tolerate and isolate job failures without compromising
 - No infinite retry loops are possible
 
 These behaviors are considered stable and form the reliability foundation for future phases.
+
+## Phase 4 — Idempotency & Safety
+
+Phase 4 focused on making the background job system safe under retries,
+duplicate submissions, and worker crashes.
+
+Key outcomes:
+- Introduced client-defined idempotency keys to prevent duplicate jobs
+- Enforced strict API validation to protect the idempotency contract
+- Decoupled semantic intent (idempotencyKey) from system identity (jobId)
+- Implemented a Redis-based reservation pattern to guarantee at-most-once
+  execution of side effects
+- Verified correct behavior through extensive edge-case testing
+
+This phase highlighted the importance of testing failure modes,
+not just happy paths. Several subtle bugs were discovered and fixed by
+intentionally misusing the system and observing Redis state and worker logs.
+
+The system now behaves correctly under:
+- duplicate API requests
+- retries due to transient failures
+- worker crashes and restarts
+
+Phase 4 marks the completion of the system’s safety and correctness goals.

@@ -1,22 +1,50 @@
 const { addJob, getJobById } = require("../queue/jobQueue");
 
 async function createJob(req, res) {
-  const { type, payload } = req.body;
+  const { type, payload, idempotencyKey } = req.body;
 
-  if (!type || !payload) {
+  if (!type || !payload || !idempotencyKey) {
     return res.status(400).json({
-      error: "Job type and payload are required",
+      error: "Job type, payload and idempotencyKey are required",
+    });
+  }
+
+  if (
+    typeof idempotencyKey !== "string" ||
+    idempotencyKey.trim().length === 0
+  ) {
+    return res.status(400).json({
+      error: "idempotencyKey must be a string and it cannot be empty",
+    });
+  }
+
+  if (/^[a-f0-9]{64}$/i.test(idempotencyKey)) {
+    return res.status(400).json({
+      error:
+        "idempotencyKey must be a semantic client-defined value, not a jobId",
+    });
+  }
+
+  if (
+    !payload.email ||
+    typeof payload.email !== "string" ||
+    payload.email.trim().length === 0
+  ) {
+    return res.status(400).json({
+      error: "payload.email is required and must be a non-empty string",
     });
   }
 
   try {
-    const job = await addJob(type, payload);
+    const job = await addJob(type, payload, idempotencyKey);
 
     return res.status(202).json({
       status: "accepted",
       jobId: job.id,
     });
   } catch (err) {
+    console.error("Enqueue Error:", err.message);
+
     return res.status(500).json({
       error: "Failed to enqueue job",
     });
