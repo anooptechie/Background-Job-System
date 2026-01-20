@@ -158,6 +158,64 @@ crashes, and duplicate requests.
 > Job IDs enforce safety.  
 > Side effects must be protected before execution.
 
+## Phase 5 — Background-Only & Scheduled Jobs
+
+Phase 5 extends the system beyond HTTP-triggered jobs.  
+Jobs can now be created and executed **entirely by the system itself**.
+
+This models real backend workflows such as cron jobs, maintenance tasks,
+and internal background processing.
+
+---
+
+### Phase 5.1 — System-Initiated Jobs (No HTTP)
+
+- Introduced a **system producer** that enqueues jobs without any API call
+- Jobs are created by running a Node.js script
+- Reuses the same queue, Redis connection, and idempotency logic
+- Worker remains unchanged
+
+This proves that job producers are not tied to HTTP and can exist independently.
+
+---
+
+### Phase 5.2 — Scheduled Jobs (Cron-like)
+
+- Added a lightweight scheduler using `setInterval`
+- Scheduler runs as a separate process
+- Jobs are triggered on a fixed time interval
+- No external cron or infrastructure required
+
+---
+
+### Phase 5.3 — Safety Rules for Scheduled Jobs
+
+To prevent duplication and unsafe execution:
+
+- Scheduled jobs use **time-bucketed idempotency keys**
+- Same time window → same job → no duplicates
+- Scheduler is stateless and restart-safe
+- Worker retries and side-effect safety remain enforced
+
+---
+
+### Key Outcome
+
+The system now supports:
+- API-triggered jobs
+- System-triggered jobs
+- Scheduled jobs
+
+All with:
+- idempotent job creation
+- retry-safe execution
+- at-most-once side effects
+- Redis as the source of truth
+
+This completes the transition from request-response background work
+to autonomous backend processing.
+
+
 Configuration
 
 All infrastructure configuration is externalized.

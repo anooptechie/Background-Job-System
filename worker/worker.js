@@ -1,6 +1,15 @@
 const { Worker } = require("bullmq");
 const connection = require("../shared/redis");
 
+console.log("🚀 Worker process started");
+
+connection.on("connect", () => {
+  console.log("👷 Worker connected to Redis");
+});
+
+connection.on("error", (err) => {
+  console.error("❌ Worker Redis Error:", err.message);
+});
 const worker = new Worker(
   "jobs-queue",
   async (job) => {

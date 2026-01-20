@@ -167,3 +167,33 @@ The system now behaves correctly under:
 - worker crashes and restarts
 
 Phase 4 marks the completion of the system’s safety and correctness goals.
+
+## Phase 5 — Background-Only & Scheduled Jobs
+
+Phase 5 focused on removing the dependency on HTTP requests for job creation
+and enabling system-driven background workflows.
+
+### Phase 5.1 — System Producer
+- Added a standalone Node.js script that enqueues jobs directly
+- Reused existing queue and idempotency logic
+- Confirmed that workers can process jobs created outside the API lifecycle
+
+### Phase 5.2 — Scheduled Jobs
+- Implemented a simple scheduler using `setInterval`
+- Scheduler runs as an independent process
+- Jobs are triggered periodically without user interaction
+
+### Phase 5.3 — Safety & Correctness
+- Introduced time-bucketed idempotency keys for scheduled jobs
+- Prevented duplicate job creation across restarts
+- Ensured retries and side-effect safety remain intact
+- Kept scheduler stateless and lightweight
+
+### Key Learnings
+- Background systems should not rely on HTTP as the only entry point
+- Idempotency is critical for scheduled and system-triggered workflows
+- Redis acts as the single source of truth across all producers
+- Simple scheduling mechanisms can be safe if correctness rules are enforced
+
+Phase 5 completes the system’s transition to autonomous background processing.
+
