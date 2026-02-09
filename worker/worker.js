@@ -18,6 +18,12 @@ const worker = new Worker(
     console.log("Job Type", job.name);
     console.log("Job Data", job.data);
 
+    // 🔴 Test 4.1 – intentional failure to test retry
+    // if (job.data?.forceFail === true) {
+    //   console.log("⚠️ Forcing job failure for retry test:", job.id);
+    //   throw new Error("Intentional failure for retry test");
+    // }
+
     const sideEffectKey = `side-effect:${job.id}`;
 
     // Reserve side effect execution (atomic)
@@ -32,6 +38,12 @@ const worker = new Worker(
 
     // 🔹 SIDE EFFECT
     console.log("Sending welcome email to:", job.data.email);
+
+    // 🔴 Test 4.2 – At-Most-Once Side Effects
+    // if (job.data?.crashAfterSideEffect === true) {
+    //   console.log("💥 Crashing AFTER side effect for test:", job.id);
+    //   throw new Error("Crash after side effect");
+    // }
 
     //throwing error before side effect returns "done"
     // throw new Error("Crash after side effect");
