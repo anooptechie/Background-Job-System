@@ -1,10 +1,11 @@
 const { Worker } = require("bullmq");
 const connection = require("../shared/redis");
 const logger = require("../shared/logger");
-const { jobCounter, jobDuration } = require("../shared/metrics");
+const { jobCounter, jobDuration, dlqCounter } = require("../shared/metrics");
+const deadLetterQueue = require("../api/queue/deadLetterQueue");
+
 const http = require("http");
 const { client } = require("../shared/metrics");
-
 
 logger.info("worker.started");
 
@@ -53,14 +54,11 @@ const worker = new Worker(
       "job.started",
     );
 
-    // 🔴 Test 4.1 – intentional failure to test retry
-    if (job.data?.forceFail === true) {
-      logger.warn(
-        { jobId: job.id },
-        "job.forced_failure_for_retry_test",
-      );
-      throw new Error("Intentional failure for retry test");
-    }
+    // 🔴 Test hook – intentional failure to test retry / DLQ
+    // if (job.data?.forceFail === true) {
+    //   logger.warn({ jobId: job.id }, "job.forced_failure");
+    //   throw new Error("Intentional failure");
+    // }
 
     const sideEffectKey = `side-effect:${job.id}`;
 
@@ -70,7 +68,6 @@ const worker = new Worker(
     if (!reserved) {
       logger.warn({ jobId: job.id }, "job.side_effect_already_executed");
 
-      // Record recovered completion
       try {
         jobCounter.inc({ status: "success", type: job.name });
         jobDuration.observe({ type: job.name }, Date.now() - startTime);
@@ -100,7 +97,6 @@ const worker = new Worker(
     // Mark side effect as completed
     await connection.set(sideEffectKey, "done");
 
-    // Record success metrics
     try {
       jobCounter.inc({ status: "success", type: job.name });
       jobDuration.observe({ type: job.name }, Date.now() - startTime);
@@ -113,7 +109,7 @@ const worker = new Worker(
   { connection },
 );
 
-worker.on("failed", (job, err) => {
+worker.on("failed", async (job, err) => {
   // Record failure metric
   try {
     jobCounter.inc({ status: "failed", type: job.name });
@@ -127,5 +123,38 @@ worker.on("failed", (job, err) => {
       err: err.message,
     },
     "job.failed",
+  );
+
+  // 🔻 DLQ HANDLING (terminal failure only)
+  const attemptsMade = job.attemptsMade;
+  const maxAttempts = job.opts.attempts || 3;
+
+  if (attemptsMade < maxAttempts) {
+    // retries still remaining → NOT dead
+    return;
+  }
+
+  await deadLetterQueue.add("dead-job", {
+    originalJobId: job.id,
+    jobType: job.name,
+    payload: job.data,
+    failedReason: err.message,
+    attemptsMade,
+    failedAt: new Date().toISOString(),
+  });
+
+  // ✅ DLQ metric (ONE place, ONE time)
+  try {
+    dlqCounter.inc({ type: job.name });
+  } catch (e) {
+    logger.error({ err: e.message }, "metrics.recording_failed");
+  }
+
+  logger.error(
+    {
+      jobId: job.id,
+      attemptsMade,
+    },
+    "job.moved_to_dlq",
   );
 });

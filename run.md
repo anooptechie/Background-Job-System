@@ -279,3 +279,188 @@ The system can now reliably:
 
 This observability foundation enables safe progression to DLQs, scaling, and alerting in future phases.
 
+7. Dead Letter Queue (DLQ) Verification
+
+This section verifies Phase 7 – Explicit Dead Letter Queue (DLQ) behavior.
+
+The goal is to prove that only terminally failed jobs are moved to the DLQ, retries are respected, and normal job processing remains unaffected.
+
+7.1 Test: Job Retries Do NOT Enter DLQ
+
+Configure a job with retries (e.g. attempts: 3).
+
+Enable a forced failure in the worker:
+
+if (job.data?.forceFail === true) {
+  throw new Error("Intentional failure");
+}
+
+Submit a job that fails on execution.
+
+Expected behavior:
+
+Job fails and retries automatically
+
+Worker logs multiple job.failed events
+
+No job.moved_to_dlq log appears
+
+dlq_jobs_total metric does not increment
+
+This confirms that retrying jobs are not considered dead.
+
+7.2 Test: Terminal Failure Moves Job to DLQ
+
+Submit a job that always fails and exhausts all retries.
+
+Observe worker logs.
+
+Expected log sequence:
+
+Multiple job.failed events
+
+Exactly one job.moved_to_dlq event after final retry
+
+Expected metrics:
+
+dlq_jobs_total{type="<job-type>"} +1
+
+This confirms that jobs are moved to the DLQ once and only once after retries are exhausted.
+
+7.3 Inspect DLQ Contents
+
+Run the DLQ inspection script:
+
+node scripts/inspectDlq.js
+
+Expected output:
+
+DLQ job has its own DLQ-scoped ID
+
+Original job ID is preserved
+
+Job payload and failure reason are retained
+
+This confirms that the DLQ acts as a durable audit record.
+
+7.4 Verify DLQ Isolation
+
+After a job enters the DLQ, submit a healthy job.
+
+Expected behavior:
+
+Healthy job processes successfully
+
+DLQ contents remain unchanged
+
+Worker remains stable
+
+This confirms that DLQ jobs do not block or interfere with normal processing.
+
+7.5 Verify DLQ Metrics
+
+Open the worker metrics endpoint:
+
+http://localhost:3001/metrics
+
+Expected metrics:
+
+dlq_jobs_total{type="<job-type>"} <count>
+
+Relationship to other metrics:
+
+jobs_total{status="failed"} counts execution attempts
+
+dlq_jobs_total counts terminal job failures
+
+This separation ensures retries and permanent failures are observable independently.
+
+Outcome
+
+After completing Phase 7 verification, the system guarantees:
+
+Clear separation between transient failures and terminal failures
+
+Safe isolation of permanently failed jobs
+
+Durable, inspectable DLQ records
+
+Accurate metrics for both retries and dead-lettered jobs
+
+With Phase 7 complete, the system now supports failure isolation and operational clarity, enabling safe replay, alerting, and scaling in future phases.
+
+8. DLQ Replay Verification
+
+This section verifies Phase 8 – DLQ Replay Semantics.
+
+Replay is a manual, explicit operation that creates a new job from a DLQ entry after the underlying failure cause has been addressed.
+
+8.1 Inspect DLQ and Select a Job to Replay
+
+List DLQ jobs:
+
+node scripts/inspectDlq.js
+
+Identify the DLQ Job ID to replay.
+
+Important:
+
+Replay uses DLQ Job ID, not the original job ID
+
+DLQ job IDs are scoped to the dead-letter queue
+
+8.2 Replay a DLQ Job
+
+Run the replay script with the DLQ job ID:
+
+node scripts/replayDlqJob.js <dlqJobId>
+
+Expected output:
+
+DLQ job metadata is printed
+
+A new job ID is created in jobs-queue
+
+Lineage is preserved via replayedFromJobId
+
+8.3 Verify Replay Execution
+
+Observe worker logs for the replayed job:
+
+Expected log sequence:
+
+job.started
+
+job.side_effect_started
+
+job.completed
+
+If the underlying issue is unresolved, the replayed job may fail again and re-enter the DLQ as a new DLQ entry.
+
+8.4 Verify Replay Safety Guarantees
+
+Confirm the following properties:
+
+Replay creates a new job ID
+
+Original DLQ entry remains unchanged
+
+Replay does not bypass retries or idempotency
+
+No automatic replay loops exist
+
+This confirms replay is safe, explicit, and auditable.
+
+Outcome
+
+After completing Phases 7 and 8 verification, the system guarantees:
+
+Clear separation between transient failures and terminal failures
+
+Durable isolation of permanently failed jobs
+
+Safe, manual replay of DLQ entries
+
+Full observability across retries, DLQ, and replay lifecycle
+
+With DLQ and replay semantics in place, the system is now ready for horizontal scaling, queue isolation, and alerting.

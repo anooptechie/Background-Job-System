@@ -305,6 +305,152 @@ Metrics explain how often and how long
 
 This separation ensures observability does not interfere with correctness.
 
+☠️ Dead Letter Queue (DLQ) (Phase 7)
+
+The system includes an explicit Dead Letter Queue (DLQ) to handle terminal job failures safely and transparently.
+
+The DLQ isolates permanently failed jobs without affecting normal job execution.
+
+When a Job Enters the DLQ
+
+A job is moved to the DLQ only when:
+
+All retry attempts are exhausted
+
+The job reaches a terminal failure state
+
+Retrying jobs are not considered dead and never enter the DLQ.
+
+DLQ Behavior
+
+DLQ is a separate BullMQ queue
+
+No worker consumes DLQ jobs
+
+Jobs enter the DLQ exactly once
+
+DLQ jobs are inert and do not trigger side effects
+
+This ensures failure isolation and prevents cascading errors.
+
+DLQ Contents
+
+Each DLQ entry includes:
+
+Original job ID
+
+Job type
+
+Job payload
+
+Failure reason
+
+Number of attempts
+
+Failure timestamp
+
+This makes DLQ jobs inspectable and replay-ready.
+
+DLQ Metrics
+
+The worker exposes a dedicated DLQ metric:
+
+dlq_jobs_total
+
+Counts permanently failed jobs
+
+Labeled by job type
+
+This metric complements retry-level failure metrics and provides clear operational visibility.
+
+Why This Matters
+
+Explicit DLQs allow the system to:
+
+Distinguish between recoverable and unrecoverable failures
+
+Preserve failure context for inspection
+
+Scale safely without hiding broken jobs
+
+Support future replay and alerting workflows
+
+🔁 DLQ Replay Semantics (Phase 8)
+
+The system supports explicit replay of Dead Letter Queue (DLQ) jobs to allow safe recovery from terminal failures.
+
+Replay is intentionally manual and controlled.
+
+What Replay Means
+
+Replay does not resurrect failed jobs.
+
+Instead, replay:
+
+Creates a new job
+
+Uses the original job payload
+
+Preserves lineage metadata
+
+Executes under normal retry and idempotency rules
+
+This avoids hidden state reuse and preserves correctness.
+
+How Replay Works
+
+A DLQ entry is inspected
+
+A specific DLQ Job ID is selected
+
+A new job is enqueued into the main job queue
+
+Lineage metadata is attached:
+
+replayedFromJobId
+
+replayedAt
+
+The original DLQ entry remains unchanged.
+
+Replay Safety Guarantees
+
+Replay always generates a new job ID
+
+Replay does not bypass retries or side-effect protection
+
+Replay does not delete or modify DLQ records
+
+Replay never occurs automatically
+
+Each replay is an explicit operational decision.
+
+Failure During Replay
+
+If a replayed job fails again:
+
+It follows normal retry behavior
+
+On terminal failure, it enters the DLQ as a new DLQ entry
+
+Previous DLQ entries remain intact
+
+This ensures replay attempts are fully auditable.
+
+Why This Matters
+
+Explicit replay semantics allow the system to:
+
+Recover safely from permanent failures
+
+Preserve historical failure context
+
+Avoid retry storms or hidden loops
+
+Support operational workflows used in real systems
+
+Replay completes the failure lifecycle without sacrificing correctness.
+
 ---
 
 ## ⚙️ Configuration

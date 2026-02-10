@@ -8,7 +8,10 @@ const jobQueue = new Queue("jobs-queue", {
 
 //hashing jobid
 function toJobId(idempotencyKey) {
-  return crypto.createHash("sha256").update(String(idempotencyKey)).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(String(idempotencyKey))
+    .digest("hex");
 }
 
 async function addJob(type, payload, idempotencyKey) {
@@ -26,7 +29,6 @@ async function addJob(type, payload, idempotencyKey) {
 
   return job;
 }
-
 
 async function getJobById(jobId) {
   const job = await jobQueue.getJob(jobId);

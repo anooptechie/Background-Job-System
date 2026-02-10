@@ -286,3 +286,164 @@ How long successful jobs take to execute (distribution, not averages)?
 Whether retries and recovery paths behave as expected
 
 Phase 6 establishes observability as a first-class system capability and forms the foundation for safe scaling, explicit DLQs, and operational alerting in later phases.
+
+1️⃣ Update PROJECT_CONTEXT.md (Phase 7)
+
+📍 Where to add
+Append this as a new section after Phase 6, before any “Future” or “Next” sections.
+
+Dead Letter Queue (DLQ) – Phase 7
+
+Phase 7 introduced an explicit Dead Letter Queue (DLQ) to isolate terminal job failures from normal job processing.
+
+The goal of this phase was to separate transient failures from permanent failures while preserving observability and correctness guarantees established in earlier phases.
+
+DLQ Design Decisions
+
+A job is considered dead only after all retry attempts are exhausted
+
+Only terminal failures are moved to the DLQ
+
+DLQ is implemented as a separate BullMQ queue
+
+No worker is attached to the DLQ
+
+DLQ is write-only in this phase
+
+This ensures retries behave normally and DLQ usage is explicit and intentional.
+
+DLQ Semantics
+
+Retry failures do not enter the DLQ
+
+A job enters the DLQ exactly once
+
+Normal job execution remains unaffected
+
+DLQ jobs are inert and do not trigger side effects
+
+This prevents retry storms, cascading failures, and hidden execution paths.
+
+DLQ Payload Strategy
+
+Each DLQ entry preserves sufficient context for inspection and future replay:
+
+Original job ID
+
+Job type
+
+Original payload
+
+Failure reason
+
+Attempts made
+
+Failure timestamp
+
+The DLQ acts as a durable audit record, not an automated recovery mechanism.
+
+DLQ Observability
+
+Phase 7 extends observability with a dedicated DLQ metric:
+
+dlq_jobs_total
+
+Counts jobs that permanently failed
+
+Labeled by job type
+
+This cleanly separates:
+
+execution failures (retry-level)
+
+terminal failures (DLQ-level)
+
+Phase Outcome
+
+After Phase 7, the system guarantees:
+
+Clear distinction between transient and terminal failures
+
+Safe isolation of permanently failed jobs
+
+Durable and inspectable failure records
+
+Metrics that reflect true system health
+
+Phase 7 completes the failure lifecycle model, enabling future work such as replay, alerting, and operational workflows.
+
+DLQ Replay Semantics (Phase 8)
+
+Phase 8 introduced explicit and safe replay semantics for jobs stored in the Dead Letter Queue (DLQ).
+
+The goal of this phase was to enable intentional recovery from terminal failures without compromising correctness, idempotency, or observability guarantees.
+
+Replay Design Principles
+
+Replay is treated as an operational action, not an automated system behavior.
+
+Key principles:
+
+Replay always creates a new job
+
+Original jobs and DLQ records are never mutated
+
+Replay is manual and explicit
+
+Workers remain unaware of replay mechanics
+
+This ensures replay does not bypass retry logic or execution safeguards.
+
+Replay Semantics
+
+DLQ entries are replayed by DLQ Job ID, not original job ID
+
+Replay enqueues a new job into the primary queue
+
+A new job ID is always generated
+
+Lineage is preserved via metadata:
+
+replayedFromJobId
+
+replayedAt
+
+The original DLQ entry remains as a durable audit record.
+
+Failure and Replay Interaction
+
+A replayed job may succeed or fail independently
+
+If a replayed job fails permanently, it creates a new DLQ entry
+
+No automatic replay loops exist
+
+Each replay represents an explicit human decision
+
+This prevents infinite failure cycles and hidden recovery behavior.
+
+Observability Guarantees
+
+Replay semantics preserve all observability guarantees:
+
+Job execution metrics reflect replayed jobs as normal executions
+
+DLQ metrics remain historical and append-only
+
+Logs clearly distinguish replayed jobs via lineage metadata
+
+Replay does not alter existing metrics semantics.
+
+Phase Outcome
+
+After Phase 8, the system guarantees:
+
+Safe recovery from terminal job failures
+
+Clear separation between retry and replay semantics
+
+Full auditability of failures and recovery attempts
+
+No hidden or automatic execution paths
+
+Phase 8 completes the failure recovery lifecycle, enabling confident operation and future scaling.
