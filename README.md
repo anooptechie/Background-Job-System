@@ -238,6 +238,73 @@ All job types benefit from:
 
 This completes the transition from request-response background work to autonomous backend processing.
 
+Observability & Monitoring (Phase 6)
+
+The system includes built-in observability to make asynchronous job execution transparent, debuggable, and production-aligned.
+
+Observability is implemented without altering job execution semantics or failure behavior.
+
+Structured Logging
+
+Worker logs are structured and machine-readable
+
+Every job-related log includes a stable jobId
+
+Logs represent job lifecycle events, not HTTP request flows
+
+Enables tracing a job across retries, failures, and recovery paths
+
+Example events include:
+
+job.started
+
+job.side_effect_started
+
+job.completed
+
+job.completed_recovered
+
+job.failed
+
+Metrics
+
+The worker emits Prometheus-compatible metrics for job execution.
+
+Job Metrics
+
+Execution counters
+
+Successful job executions
+
+Failed execution attempts (including retries)
+
+Latency histograms
+
+Execution duration for successful jobs only
+
+Bucketed to expose performance distribution
+
+Metrics are labeled by job type to support per-job analysis.
+
+Metrics Endpoints
+Process	Endpoint	Description
+API	/metrics	API and process-level metrics
+Worker	/metrics (separate port)	Job execution metrics
+
+Each process exposes its own metrics endpoint, reflecting real-world distributed systems where workers scale independently.
+
+Observability Design Principles
+
+Metrics are read-only signals
+
+Metrics failures never impact job execution
+
+Logs explain what happened
+
+Metrics explain how often and how long
+
+This separation ensures observability does not interfere with correctness.
+
 ---
 
 ## ⚙️ Configuration

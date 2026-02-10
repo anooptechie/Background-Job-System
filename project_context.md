@@ -222,3 +222,67 @@ All with:
 - Retry-safe execution
 - At-most-once side effects
 - Redis as the source of truth
+
+Observability & Monitoring (Phase 6)
+
+Phase 6 focused on making the system observable under real execution conditions without changing job semantics, control flow, or failure behavior.
+
+The goal was to ensure that background job execution can be understood, measured, and trusted during success, failure, retries, and recovery scenarios.
+
+Logging Decisions
+
+Replaced ad-hoc console logging in the worker with structured logs
+
+Enforced consistent job-level correlation using jobId
+
+Logs represent execution events, not request–response flows
+
+Log ordering is intentionally non-linear due to asynchronous execution
+
+This enables reliable reconstruction of a job’s lifecycle across retries, crashes, and worker restarts.
+
+Metrics Decisions
+
+The system now emits Prometheus-compatible metrics from the worker process.
+
+Metrics are strictly observational and never influence execution logic.
+
+Recorded metrics include:
+
+Job execution counters
+
+Successful executions
+
+Failed execution attempts (including retries)
+
+Execution latency histograms
+
+Recorded only for successful job executions
+
+Bucketed to reveal performance distribution rather than averages
+
+Failed executions are intentionally excluded from latency histograms to prevent skewed performance signals.
+
+Metrics Exposure Model
+
+The API process exposes /metrics for API and process-level metrics
+
+The worker process exposes /metrics on a separate port for job execution metrics
+
+Metrics are process-local and not shared across memory boundaries
+
+This mirrors real-world production systems where workers scale independently and expose their own operational signals.
+
+Observability Guarantees
+
+After Phase 6, the system can reliably answer:
+
+How many jobs are executed per job type?
+
+How many failure and retry events occur?
+
+How long successful jobs take to execute (distribution, not averages)?
+
+Whether retries and recovery paths behave as expected
+
+Phase 6 establishes observability as a first-class system capability and forms the foundation for safe scaling, explicit DLQs, and operational alerting in later phases.

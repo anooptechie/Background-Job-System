@@ -1,28 +1,66 @@
 const { Worker } = require("bullmq");
 const connection = require("../shared/redis");
+const logger = require("../shared/logger");
+const { jobCounter, jobDuration } = require("../shared/metrics");
+const http = require("http");
+const { client } = require("../shared/metrics");
 
-console.log("🚀 Worker process started");
+
+logger.info("worker.started");
 
 connection.on("connect", () => {
-  console.log("👷 Worker connected to Redis");
+  logger.info("worker.redis.connected");
 });
 
 connection.on("error", (err) => {
-  console.error("❌ Worker Redis Error:", err.message);
+  logger.error({ err: err.message }, "worker.redis.error");
 });
+
+const METRICS_PORT = process.env.WORKER_METRICS_PORT || 3001;
+
+http
+  .createServer(async (req, res) => {
+    if (req.url === "/metrics") {
+      try {
+        res.writeHead(200, {
+          "Content-Type": client.register.contentType,
+        });
+        res.end(await client.register.metrics());
+      } catch (err) {
+        res.writeHead(500);
+        res.end(err.message);
+      }
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  })
+  .listen(METRICS_PORT, () => {
+    logger.info({ port: METRICS_PORT }, "worker.metrics_server.started");
+  });
+
 const worker = new Worker(
   "jobs-queue",
   async (job) => {
-    console.log("Processing Jobs");
-    console.log("Jobs ID:", job.id);
-    console.log("Job Type", job.name);
-    console.log("Job Data", job.data);
+    const startTime = Date.now();
+
+    logger.info(
+      {
+        jobId: job.id,
+        jobType: job.name,
+      },
+      "job.started",
+    );
 
     // 🔴 Test 4.1 – intentional failure to test retry
-    // if (job.data?.forceFail === true) {
-    //   console.log("⚠️ Forcing job failure for retry test:", job.id);
-    //   throw new Error("Intentional failure for retry test");
-    // }
+    if (job.data?.forceFail === true) {
+      logger.warn(
+        { jobId: job.id },
+        "job.forced_failure_for_retry_test",
+      );
+      throw new Error("Intentional failure for retry test");
+    }
 
     const sideEffectKey = `side-effect:${job.id}`;
 
@@ -30,23 +68,31 @@ const worker = new Worker(
     const reserved = await connection.set(sideEffectKey, "in-progress", "NX");
 
     if (!reserved) {
-      console.log("Side effect already reserved/executed, skipping:", job.id);
+      logger.warn({ jobId: job.id }, "job.side_effect_already_executed");
 
-      console.log("Job Completed Safely (recovered)", job.id);
+      // Record recovered completion
+      try {
+        jobCounter.inc({ status: "success", type: job.name });
+        jobDuration.observe({ type: job.name }, Date.now() - startTime);
+      } catch (err) {
+        logger.error({ err: err.message }, "metrics.recording_failed");
+      }
+
+      logger.info({ jobId: job.id }, "job.completed_recovered");
       return;
     }
 
     // 🔹 SIDE EFFECT
-    console.log("Sending welcome email to:", job.data.email);
+    logger.info({ jobId: job.id }, "job.side_effect_started");
 
     // 🔴 Test 4.2 – At-Most-Once Side Effects
     // if (job.data?.crashAfterSideEffect === true) {
-    //   console.log("💥 Crashing AFTER side effect for test:", job.id);
+    //   logger.error(
+    //     { jobId: job.id },
+    //     "job.crash_after_side_effect_test",
+    //   );
     //   throw new Error("Crash after side effect");
     // }
-
-    //throwing error before side effect returns "done"
-    // throw new Error("Crash after side effect");
 
     // simulate async work
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -54,16 +100,32 @@ const worker = new Worker(
     // Mark side effect as completed
     await connection.set(sideEffectKey, "done");
 
-    console.log("Job Completed Safely", job.id);
+    // Record success metrics
+    try {
+      jobCounter.inc({ status: "success", type: job.name });
+      jobDuration.observe({ type: job.name }, Date.now() - startTime);
+    } catch (err) {
+      logger.error({ err: err.message }, "metrics.recording_failed");
+    }
+
+    logger.info({ jobId: job.id }, "job.completed");
   },
   { connection },
 );
 
 worker.on("failed", (job, err) => {
-  console.error("Job failed", job.id, err.message);
-});
+  // Record failure metric
+  try {
+    jobCounter.inc({ status: "failed", type: job.name });
+  } catch (e) {
+    logger.error({ err: e.message }, "metrics.recording_failed");
+  }
 
-// 🔴 Phase 3.1: intentional failure
-// if (job.name === "welcome-email") {
-//   throw new Error("Simulated email service failure");
-// }
+  logger.error(
+    {
+      jobId: job.id,
+      err: err.message,
+    },
+    "job.failed",
+  );
+});
