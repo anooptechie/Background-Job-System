@@ -96,12 +96,12 @@ Each job has an observable lifecycle managed by BullMQ.
 
 ### Job States
 
-| State | Description |
-|-------|-------------|
-| `waiting` | Job is queued but not yet being processed |
-| `active` | Job is currently being processed by a worker |
-| `completed` | Job finished successfully |
-| `failed` | Job execution failed after all retry attempts |
+| State       | Description                                   |
+| ----------- | --------------------------------------------- |
+| `waiting`   | Job is queued but not yet being processed     |
+| `active`    | Job is currently being processed by a worker  |
+| `completed` | Job finished successfully                     |
+| `failed`    | Job execution failed after all retry attempts |
 
 **Note:** Jobs can remain in the `waiting` state when no workers are running. This is intentional and correct.
 
@@ -287,9 +287,9 @@ Bucketed to expose performance distribution
 Metrics are labeled by job type to support per-job analysis.
 
 Metrics Endpoints
-Process	Endpoint	Description
-API	/metrics	API and process-level metrics
-Worker	/metrics (separate port)	Job execution metrics
+Process Endpoint Description
+API /metrics API and process-level metrics
+Worker /metrics (separate port) Job execution metrics
 
 Each process exposes its own metrics endpoint, reflecting real-world distributed systems where workers scale independently.
 
@@ -450,6 +450,95 @@ Avoid retry storms or hidden loops
 Support operational workflows used in real systems
 
 Replay completes the failure lifecycle without sacrificing correctness.
+
+Horizontal Scaling & Worker Concurrency (Phase 9)
+
+The system supports both horizontal and vertical scaling.
+
+Horizontal Scaling
+
+Multiple worker processes can run simultaneously, all consuming from the same queue.
+
+Example:
+
+API
+Worker 1
+Worker 2
+Worker 3
+
+
+Each worker:
+
+Competes for jobs
+
+Processes different jobs
+
+May handle retries from other workers
+
+Maintains exclusive execution per job attempt
+
+Redis-based locking ensures safe distributed processing.
+
+Per-Worker Concurrency
+
+Workers support configurable concurrency:
+
+{
+  connection,
+  concurrency: 3
+}
+
+
+This allows a single worker to process multiple jobs in parallel.
+
+Scaling formula:
+
+Total parallel jobs =
+Number of workers × concurrency
+
+
+Example:
+
+3 workers × concurrency 3 = 9 parallel jobs
+
+Observability in a Distributed Setup
+
+Each worker exposes a metrics endpoint:
+
+http://localhost:3001/metrics
+http://localhost:3002/metrics
+http://localhost:3003/metrics
+
+
+Metrics are process-local and intended for external aggregation tools such as Prometheus.
+
+Retry Behavior Under Scale
+
+Retries are not bound to a specific worker.
+
+A failed job attempt:
+
+Is released back to the queue
+
+May be retried by any available worker
+
+Remains protected by distributed locking
+
+This ensures fairness and resilience.
+
+Why This Matters
+
+Phase 9 validates that the system:
+
+Scales safely under concurrent load
+
+Maintains idempotency guarantees
+
+Preserves failure isolation
+
+Increases throughput predictably
+
+The project now behaves as a distributed job processing system rather than a single-instance background worker.
 
 ---
 

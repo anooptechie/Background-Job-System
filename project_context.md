@@ -447,3 +447,107 @@ Full auditability of failures and recovery attempts
 No hidden or automatic execution paths
 
 Phase 8 completes the failure recovery lifecycle, enabling confident operation and future scaling.
+
+Horizontal Scaling & Worker Concurrency (Phase 9)
+
+Phase 9 introduced horizontal and vertical scaling capabilities to validate the system under concurrent load.
+
+This phase tested the architectural assumptions made in earlier phases, particularly idempotency, retry safety, DLQ behavior, and observability under multi-worker execution.
+
+Horizontal Scaling (Multiple Workers)
+
+Multiple worker processes were started simultaneously, all consuming from the same jobs-queue.
+
+Key properties validated:
+
+Jobs are distributed across workers
+
+A single job is processed by only one worker at a time
+
+Retries may be handled by different workers
+
+DLQ behavior remains correct under concurrent failures
+
+No duplicate side effects occurred
+
+BullMQ uses Redis-based locking to ensure exclusive job processing across workers.
+
+Vertical Scaling (Per-Worker Concurrency)
+
+Worker concurrency was increased using:
+
+{
+  connection,
+  concurrency: 3
+}
+
+
+This allows a single worker to process multiple jobs concurrently.
+
+Observations:
+
+Multiple jobs start execution immediately within the same worker
+
+Throughput increases proportionally for I/O-bound jobs
+
+Idempotency safeguards continue to prevent duplicate side effects
+
+Metrics remain accurate per worker instance
+
+Observability Under Scale
+
+Each worker exposes its own /metrics endpoint on a separate port.
+
+Metrics are:
+
+Process-local
+
+Independent per worker
+
+Aggregation-ready (via external monitoring tools)
+
+This mirrors real distributed monitoring setups.
+
+Retry Distribution Behavior
+
+Under concurrent load:
+
+A job's retry attempts may be executed by different workers
+
+Worker affinity is not enforced
+
+Locking ensures only one worker processes a job attempt at a time
+
+This behavior is expected and desirable in distributed queue systems.
+
+Throughput Validation
+
+Controlled experiments were performed:
+
+Baseline with concurrency = 1
+
+Increased concurrency = 3
+
+Measured execution time reduction
+
+Observed near-linear improvement for I/O-bound workloads
+
+This confirms the system scales both horizontally and vertically.
+
+Phase 9 Outcome
+
+After Phase 9, the system now supports:
+
+Multi-process distributed execution
+
+Per-worker concurrency scaling
+
+Safe retry handling across workers
+
+Correct DLQ behavior under concurrent load
+
+Observable metrics per worker instance
+
+Verified throughput improvements
+
+Phase 9 transitions the system from a single-node job processor to a scalable distributed worker cluster

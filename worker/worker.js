@@ -55,10 +55,10 @@ const worker = new Worker(
     );
 
     // 🔴 Test hook – intentional failure to test retry / DLQ
-    // if (job.data?.forceFail === true) {
-    //   logger.warn({ jobId: job.id }, "job.forced_failure");
-    //   throw new Error("Intentional failure");
-    // }
+    if (job.data?.forceFail === true) {
+      logger.warn({ jobId: job.id }, "job.forced_failure");
+      throw new Error("Intentional failure");
+    }
 
     const sideEffectKey = `side-effect:${job.id}`;
 
@@ -106,7 +106,7 @@ const worker = new Worker(
 
     logger.info({ jobId: job.id }, "job.completed");
   },
-  { connection },
+  { connection, concurrency: 3 },
 );
 
 worker.on("failed", async (job, err) => {

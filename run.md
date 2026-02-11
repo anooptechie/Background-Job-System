@@ -464,3 +464,169 @@ Safe, manual replay of DLQ entries
 Full observability across retries, DLQ, and replay lifecycle
 
 With DLQ and replay semantics in place, the system is now ready for horizontal scaling, queue isolation, and alerting.
+
+Phase 9 Testing Process
+
+You tested two things:
+
+Horizontal scaling (multiple workers)
+
+Vertical scaling (concurrency inside worker)
+
+Here’s the clean testing process.
+
+🔹 Test A — Baseline (Concurrency = 1)
+Setup
+
+1 worker
+
+concurrency not set (default = 1)
+
+Each job simulates ~2 seconds of async work
+
+Command
+npm run dev:server
+WORKER_METRICS_PORT=3001 npm run dev:worker
+
+Submit
+
+Send 6 jobs quickly.
+
+Expected Behavior
+
+Jobs execute strictly one after another
+
+Logs look sequential:
+
+job A started
+job A completed
+job B started
+job B completed
+...
+
+Measure
+
+If each job ≈ 2 seconds:
+
+6 jobs × 2 seconds = ~12 seconds total
+
+Throughput
+6 / 12 = 0.5 jobs/sec
+
+🔹 Test B — Horizontal Scaling (Multiple Workers, Concurrency = 1)
+Setup
+
+3 workers
+
+No concurrency setting
+
+npm run dev:server
+WORKER_METRICS_PORT=3001 npm run dev:worker
+WORKER_METRICS_PORT=3002 npm run dev:worker
+WORKER_METRICS_PORT=3003 npm run dev:worker
+
+Submit
+
+Send 6 jobs quickly.
+
+Expected Behavior
+
+Jobs distributed across workers
+
+Different job IDs appear in different terminals
+
+No duplicate execution
+
+Retries may occur on different workers
+
+Estimated Time
+
+With 3 workers:
+
+6 jobs / 3 workers ≈ 2 batches
+2 batches × 2 seconds ≈ 4 seconds
+
+
+Throughput roughly tripled.
+
+🔹 Test C — Vertical Scaling (Concurrency = 3)
+
+Modify worker:
+
+{
+  connection,
+  concurrency: 3
+}
+
+
+Restart workers.
+
+Setup Example
+
+2 workers × concurrency 3
+
+Total parallel jobs possible = 6
+
+Submit
+
+Send 6 jobs quickly.
+
+Expected Behavior
+
+Inside the SAME worker terminal:
+
+job A started
+job B started
+job C started
+
+
+Immediately.
+
+After ~2 seconds:
+
+job A completed
+job B completed
+job C completed
+
+
+Then next batch.
+
+Estimated Time
+6 jobs ≈ ~4 seconds
+
+
+Throughput significantly improved compared to baseline.
+
+🔎 Important Validations Performed
+
+During all tests you confirmed:
+
+No two workers processed same job simultaneously
+
+Retry attempts could move across workers
+
+DLQ behavior unchanged
+
+Idempotency safeguards still prevented duplicate side effects
+
+Metrics remained process-local
+
+That’s real distributed validation.
+
+What Phase 9 Proved
+
+Before Phase 9:
+
+Single-worker safe
+
+After Phase 9:
+
+Multi-process safe
+
+Concurrent safe
+
+Retry safe under distribution
+
+Throughput scalable
+
+That’s a big architectural leap.
