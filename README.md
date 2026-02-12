@@ -611,6 +611,88 @@ This provides both horizontal and segmented scaling.
 
 After Phase 10, the system behaves as a workload-aware distributed job processor rather than a single-queue background worker.
 
+🛑 Graceful Shutdown & Lifecycle Safety (Phase 11)
+
+The worker now supports graceful shutdown to ensure safe termination during restarts, deployments, and manual interrupts.
+
+Why This Matters
+
+Without graceful shutdown:
+
+Active jobs could be interrupted
+
+Side effects could remain incomplete
+
+Redis connections might close abruptly
+
+Metrics servers could leak ports
+
+Phase 11 eliminates these risks.
+
+How It Works
+
+The worker listens for:
+
+SIGTERM (container shutdown)
+
+SIGINT (Ctrl + C)
+
+On shutdown:
+
+Stops fetching new jobs
+
+Waits for active jobs to finish
+
+Closes all worker instances
+
+Shuts down the metrics server
+
+Disconnects from Redis
+
+Exits cleanly
+
+Example Behavior
+
+If a job is running and the worker receives SIGINT:
+
+Shutdown is initiated
+
+The active job completes normally
+
+Worker exits only after completion
+
+No partial execution occurs.
+
+Production Benefits
+
+Graceful shutdown enables:
+
+Safe Docker restarts
+
+Kubernetes rolling deployments
+
+Zero-downtime worker upgrades
+
+Controlled scale-down events
+
+This ensures operational reliability in distributed environments.
+
+System Maturity
+
+With Phase 11 complete, the system now supports:
+
+Multi-queue workload isolation
+
+Distributed horizontal scaling
+
+DLQ and replay semantics
+
+Observability via metrics and logs
+
+Graceful lifecycle management
+
+The project now reflects real-world distributed job processing behavior.
+
 
 ---
 

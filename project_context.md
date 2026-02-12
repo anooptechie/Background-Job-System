@@ -700,3 +700,117 @@ Predictable scaling behavior
 Safe extension for future job categories
 
 Phase 10 transitions the system from a monolithic queue processor to a workload-aware distributed job platform.
+
+Graceful Shutdown & Worker Lifecycle Management (Phase 11)
+
+Phase 11 introduced graceful shutdown handling to ensure safe worker termination during process interrupts, container restarts, and deployment rollouts.
+
+The goal was to guarantee that active jobs complete safely before the worker exits.
+
+Problem Addressed
+
+Without graceful shutdown:
+
+Active jobs could be interrupted mid-execution
+
+Side effects could remain partially applied
+
+Redis connections could close abruptly
+
+Metrics servers could leak open ports
+
+Containers could terminate unsafely
+
+This behavior is unacceptable in distributed production systems.
+
+Shutdown Strategy
+
+The worker now listens for:
+
+SIGTERM (container orchestration signals)
+
+SIGINT (manual interrupts)
+
+On receiving a shutdown signal:
+
+Stop fetching new jobs
+
+Allow active jobs to complete
+
+Close all BullMQ worker instances
+
+Close the metrics HTTP server
+
+Close the Redis connection
+
+Exit cleanly
+
+This guarantees controlled process termination.
+
+Worker Close Semantics
+
+worker.close() ensures:
+
+No new jobs are pulled from Redis
+
+In-progress jobs are allowed to finish
+
+Locks are released safely
+
+Retry behavior remains intact
+
+No job is abandoned mid-execution.
+
+Side-Effect Safety Under Shutdown
+
+Because side effects are protected via Redis reservation (SET NX):
+
+Interrupted executions do not duplicate side effects
+
+Retries remain safe
+
+Shutdown does not compromise idempotency guarantees
+
+Phase 11 reinforces correctness guarantees established in Phase 4.
+
+Observability During Shutdown
+
+Shutdown emits structured logs:
+
+worker.shutdown_initiated
+
+worker.shutdown_complete
+
+worker.shutdown_error (if any)
+
+This provides operational visibility during deployment events.
+
+Deployment Safety
+
+After Phase 11, the system supports:
+
+Docker container restarts
+
+Kubernetes rolling deployments
+
+Zero-downtime worker replacement
+
+Safe scale-down operations
+
+Worker processes are now production-safe under lifecycle events.
+
+Phase 11 Outcome
+
+After Phase 11, the system guarantees:
+
+No partial job execution during shutdown
+
+No side-effect duplication during interrupts
+
+Clean Redis disconnection
+
+Clean metrics server shutdown
+
+Deterministic process termination
+
+Phase 11 transitions the worker from development-safe to production-safe lifecycle management.
