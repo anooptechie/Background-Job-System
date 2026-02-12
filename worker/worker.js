@@ -3,6 +3,7 @@ const connection = require("../shared/redis");
 const logger = require("../shared/logger");
 const { jobCounter, jobDuration, dlqCounter } = require("../shared/metrics");
 const deadLetterQueue = require("../api/queue/deadLetterQueue");
+const { queues } = require("../api/queue/queueRegistry");
 
 const http = require("http");
 const { client } = require("../shared/metrics");
@@ -41,120 +42,114 @@ http
     logger.info({ port: METRICS_PORT }, "worker.metrics_server.started");
   });
 
-const worker = new Worker(
-  "jobs-queue",
-  async (job) => {
-    const startTime = Date.now();
+/* =============================
+   Shared Job Processor
+============================= */
 
-    logger.info(
-      {
-        jobId: job.id,
-        jobType: job.name,
-      },
-      "job.started",
-    );
+async function processJob(job) {
+  const startTime = Date.now();
 
-    // 🔴 Test hook – intentional failure to test retry / DLQ
-    if (job.data?.forceFail === true) {
-      logger.warn({ jobId: job.id }, "job.forced_failure");
-      throw new Error("Intentional failure");
-    }
-
-    const sideEffectKey = `side-effect:${job.id}`;
-
-    // Reserve side effect execution (atomic)
-    const reserved = await connection.set(sideEffectKey, "in-progress", "NX");
-
-    if (!reserved) {
-      logger.warn({ jobId: job.id }, "job.side_effect_already_executed");
-
-      try {
-        jobCounter.inc({ status: "success", type: job.name });
-        jobDuration.observe({ type: job.name }, Date.now() - startTime);
-      } catch (err) {
-        logger.error({ err: err.message }, "metrics.recording_failed");
-      }
-
-      logger.info({ jobId: job.id }, "job.completed_recovered");
-      return;
-    }
-
-    // 🔹 SIDE EFFECT
-    logger.info({ jobId: job.id }, "job.side_effect_started");
-
-    // 🔴 Test 4.2 – At-Most-Once Side Effects
-    // if (job.data?.crashAfterSideEffect === true) {
-    //   logger.error(
-    //     { jobId: job.id },
-    //     "job.crash_after_side_effect_test",
-    //   );
-    //   throw new Error("Crash after side effect");
-    // }
-
-    // simulate async work
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Mark side effect as completed
-    await connection.set(sideEffectKey, "done");
-
-    try {
-      jobCounter.inc({ status: "success", type: job.name });
-      jobDuration.observe({ type: job.name }, Date.now() - startTime);
-    } catch (err) {
-      logger.error({ err: err.message }, "metrics.recording_failed");
-    }
-
-    logger.info({ jobId: job.id }, "job.completed");
-  },
-  { connection, concurrency: 3 },
-);
-
-worker.on("failed", async (job, err) => {
-  // Record failure metric
-  try {
-    jobCounter.inc({ status: "failed", type: job.name });
-  } catch (e) {
-    logger.error({ err: e.message }, "metrics.recording_failed");
-  }
-
-  logger.error(
-    {
-      jobId: job.id,
-      err: err.message,
-    },
-    "job.failed",
+  logger.info(
+    { jobId: job.id, jobType: job.name },
+    "job.started"
   );
 
-  // 🔻 DLQ HANDLING (terminal failure only)
-  const attemptsMade = job.attemptsMade;
-  const maxAttempts = job.opts.attempts || 3;
+  if (job.data?.forceFail === true) {
+    logger.warn({ jobId: job.id }, "job.forced_failure");
+    throw new Error("Intentional failure");
+  }
 
-  if (attemptsMade < maxAttempts) {
-    // retries still remaining → NOT dead
+  const sideEffectKey = `side-effect:${job.id}`;
+  const reserved = await connection.set(sideEffectKey, "in-progress", "NX");
+
+  if (!reserved) {
+    logger.warn({ jobId: job.id }, "job.side_effect_already_executed");
+
+    jobCounter.inc({ status: "success", type: job.name });
+    jobDuration.observe({ type: job.name }, Date.now() - startTime);
+
+    logger.info({ jobId: job.id }, "job.completed_recovered");
     return;
   }
 
-  await deadLetterQueue.add("dead-job", {
-    originalJobId: job.id,
-    jobType: job.name,
-    payload: job.data,
-    failedReason: err.message,
-    attemptsMade,
-    failedAt: new Date().toISOString(),
-  });
+  logger.info({ jobId: job.id }, "job.side_effect_started");
 
-  // ✅ DLQ metric (ONE place, ONE time)
-  try {
-    dlqCounter.inc({ type: job.name });
-  } catch (e) {
-    logger.error({ err: e.message }, "metrics.recording_failed");
+  /* =============================
+     Simulated Workload Per Type
+  ============================= */
+
+  if (job.name === "welcome-email") {
+    await new Promise((r) => setTimeout(r, 2000));
   }
 
-  logger.error(
+  if (job.name === "generate-report") {
+    await new Promise((r) => setTimeout(r, 4000)); // heavier
+  }
+
+  if (job.name === "cleanup-temp") {
+    await new Promise((r) => setTimeout(r, 1000)); // lightweight
+  }
+
+  await connection.set(sideEffectKey, "done");
+
+  jobCounter.inc({ status: "success", type: job.name });
+  jobDuration.observe({ type: job.name }, Date.now() - startTime);
+
+  logger.info({ jobId: job.id }, "job.completed");
+}
+
+/* =============================
+   Start One Worker Per Queue
+============================= */
+
+const queueConcurrency = {
+  "email-queue": 3,
+  "report-queue": 2,   // heavy jobs → lower concurrency
+  "cleanup-queue": 1,  // lightweight but controlled
+};
+
+Object.values(queues).forEach((queue) => {
+  const worker = new Worker(
+    queue.name,
+    processJob,
     {
-      jobId: job.id,
-      attemptsMade,
-    },
-    "job.moved_to_dlq",
+      connection,
+      concurrency: queueConcurrency[queue.name] || 1,
+    }
   );
+
+  logger.info(
+    { queue: queue.name, concurrency: queueConcurrency[queue.name] || 1 },
+    "worker.queue_started"
+  );
+
+  worker.on("failed", async (job, err) => {
+    jobCounter.inc({ status: "failed", type: job.name });
+
+    logger.error(
+      { jobId: job.id, err: err.message },
+      "job.failed"
+    );
+
+    const attemptsMade = job.attemptsMade;
+    const maxAttempts = job.opts.attempts || 3;
+
+    if (attemptsMade < maxAttempts) return;
+
+    await deadLetterQueue.add("dead-job", {
+      originalJobId: job.id,
+      jobType: job.name,
+      payload: job.data,
+      failedReason: err.message,
+      attemptsMade,
+      failedAt: new Date().toISOString(),
+    });
+
+    dlqCounter.inc({ type: job.name });
+
+    logger.error(
+      { jobId: job.id, attemptsMade },
+      "job.moved_to_dlq"
+    );
+  });
 });

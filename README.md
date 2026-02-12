@@ -540,6 +540,78 @@ Increases throughput predictably
 
 The project now behaves as a distributed job processing system rather than a single-instance background worker.
 
+
+🔀 Multi-Queue Workload Isolation (Phase 10)
+
+The system now supports multiple isolated job queues to prevent cross-workload interference.
+
+Why This Matters
+
+Previously, all jobs shared a single queue.
+
+This meant:
+
+Heavy jobs could delay lightweight jobs
+
+Concurrency limits applied globally
+
+Backpressure from one job type affected all others
+
+Phase 10 introduces workload segmentation.
+
+Active Queues
+Queue Name	Job Type	Purpose
+email-queue	welcome-email	Email notifications
+report-queue	generate-report	Heavy report jobs
+cleanup-queue	cleanup-temp	Maintenance tasks
+
+Each queue:
+
+Has independent FIFO ordering
+
+Has independent concurrency configuration
+
+Is processed by its own Worker instance
+
+Per-Queue Concurrency
+
+Example configuration:
+
+Queue	Concurrency
+email-queue	3
+report-queue	2
+cleanup-queue	1
+
+This enables workload-aware resource allocation.
+
+Isolation Guarantees
+
+Heavy report jobs cannot delay email jobs
+
+Cleanup tasks cannot block report generation
+
+Retry storms remain confined to their queue
+
+DLQ behavior remains correct per job type
+
+Isolation is implemented at the Redis queue level.
+
+Scaling Model
+
+Total parallel execution:
+
+(number of workers) × (sum of per-queue concurrency)
+
+Example:
+
+1 worker → 6 parallel jobs
+2 workers → 12 parallel jobs
+
+This provides both horizontal and segmented scaling.
+
+After Phase 10, the system behaves as a workload-aware distributed job processor rather than a single-queue background worker.
+
+
 ---
 
 ## ⚙️ Configuration

@@ -1,5 +1,40 @@
 const { addJob, getJobById } = require("../queue/jobQueue");
 
+function validatePayload(type, payload) {
+  switch (type) {
+    case "welcome-email":
+      if (
+        !payload.email ||
+        typeof payload.email !== "string" ||
+        payload.email.trim().length === 0
+      ) {
+        return "payload.email is required and must be a non-empty string";
+      }
+      return null;
+
+    case "generate-report":
+      if (
+        !payload.reportType ||
+        typeof payload.reportType !== "string"
+      ) {
+        return "payload.reportType is required for generate-report";
+      }
+      return null;
+
+    case "cleanup-temp":
+      if (
+        !payload.directory ||
+        typeof payload.directory !== "string"
+      ) {
+        return "payload.directory is required for cleanup-temp";
+      }
+      return null;
+
+    default:
+      return `Unsupported job type: ${type}`;
+  }
+}
+
 async function createJob(req, res) {
   const { type, payload, idempotencyKey } = req.body;
 
@@ -14,7 +49,7 @@ async function createJob(req, res) {
     idempotencyKey.trim().length === 0
   ) {
     return res.status(400).json({
-      error: "idempotencyKey must be a string and it cannot be empty",
+      error: "idempotencyKey must be a non-empty string",
     });
   }
 
@@ -25,14 +60,9 @@ async function createJob(req, res) {
     });
   }
 
-  if (
-    !payload.email ||
-    typeof payload.email !== "string" ||
-    payload.email.trim().length === 0
-  ) {
-    return res.status(400).json({
-      error: "payload.email is required and must be a non-empty string",
-    });
+  const validationError = validatePayload(type, payload);
+  if (validationError) {
+    return res.status(400).json({ error: validationError });
   }
 
   try {
@@ -76,7 +106,7 @@ async function getJobStatus(req, res) {
       failedReason: job.failedReason || null,
     });
   } catch (err) {
-    console.error("❌ Failed to fetch job status:", err);
+    console.error("Failed to fetch job status:", err);
 
     return res.status(500).json({
       error: "Failed to fetch job status",

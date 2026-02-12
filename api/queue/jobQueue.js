@@ -1,12 +1,7 @@
-const { Queue } = require("bullmq");
-const connection = require("../../shared/redis");
 const crypto = require("crypto");
+const { getQueueByType } = require("./queueRegistry");
 
-const jobQueue = new Queue("jobs-queue", {
-  connection,
-});
-
-//hashing jobid
+// Hashing jobId from idempotencyKey (unchanged logic)
 function toJobId(idempotencyKey) {
   return crypto
     .createHash("sha256")
@@ -19,10 +14,11 @@ async function addJob(type, payload, idempotencyKey) {
     throw new Error("idempotencyKey is required");
   }
 
+  const queue = getQueueByType(type);
   const jobId = toJobId(idempotencyKey);
 
-  const job = await jobQueue.add(type, payload, {
-    jobId, // hashed, Redis-safe, BullMQ-safe
+  const job = await queue.add(type, payload, {
+    jobId,
     attempts: 3,
     backoff: { type: "fixed", delay: 10000 },
   });
@@ -31,8 +27,15 @@ async function addJob(type, payload, idempotencyKey) {
 }
 
 async function getJobById(jobId) {
-  const job = await jobQueue.getJob(jobId);
-  return job;
+  // We must search across queues
+  const { queues } = require("./queueRegistry");
+
+  for (const queue of Object.values(queues)) {
+    const job = await queue.getJob(jobId);
+    if (job) return job;
+  }
+
+  return null;
 }
 
-module.exports = { jobQueue, addJob, getJobById };
+module.exports = { addJob, getJobById };

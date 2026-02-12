@@ -551,3 +551,152 @@ Observable metrics per worker instance
 Verified throughput improvements
 
 Phase 9 transitions the system from a single-node job processor to a scalable distributed worker cluster
+
+Queue Isolation & Workload Segmentation (Phase 10)
+
+Phase 10 introduced queue isolation to separate heterogeneous workloads into independent processing lanes.
+
+The goal of this phase was to prevent noisy-neighbor effects and enable workload-specific scaling strategies.
+
+Motivation
+
+In earlier phases, all job types shared a single queue.
+
+This design works functionally but has operational limitations:
+
+Heavy jobs can delay lightweight jobs
+
+Concurrency tuning applies globally
+
+Throughput fairness cannot be enforced
+
+Backpressure from one workload affects all workloads
+
+Phase 10 resolves this by isolating job types into dedicated queues.
+
+Multi-Queue Architecture
+
+The system now maintains multiple BullMQ queues:
+
+email-queue
+
+report-queue
+
+cleanup-queue
+
+Each queue:
+
+Is backed by Redis
+
+Has independent FIFO ordering
+
+Is processed by a dedicated Worker instance
+
+Maintains separate waiting, active, completed, and failed states
+
+This ensures workload isolation at the queue level.
+
+Type-to-Queue Mapping
+
+Job types are explicitly mapped to queues:
+
+welcome-email → email-queue
+
+generate-report → report-queue
+
+cleanup-temp → cleanup-queue
+
+This mapping is enforced centrally via a queue registry.
+
+Unsupported job types are rejected at API validation time.
+
+Per-Queue Concurrency Model
+
+Each queue has independent concurrency settings:
+
+Email jobs: medium weight
+
+Report jobs: heavy weight
+
+Cleanup jobs: lightweight
+
+Concurrency is configured per queue rather than globally.
+
+This allows:
+
+Fine-grained resource allocation
+
+Workload-aware scaling
+
+Predictable throughput tuning
+
+Isolation Guarantees
+
+Queue isolation ensures:
+
+Heavy report jobs cannot delay email jobs
+
+Cleanup tasks do not block other workloads
+
+Retry storms remain confined to a single queue
+
+DLQ behavior remains queue-aware
+
+Metrics remain labeled per job type
+
+Isolation occurs at the Redis queue level, not at the worker process level.
+
+Scaling Model After Phase 10
+
+Total parallel execution capacity now equals:
+
+Sum of (per-queue concurrency × number of worker processes)
+
+Example:
+
+1 worker process:
+
+email (3)
+
+report (2)
+
+cleanup (1)
+
+Total parallel jobs = 6
+
+2 worker processes:
+Total parallel jobs = 12
+
+Scaling is both horizontal (more workers) and segmented (per-queue tuning).
+
+Observability Under Isolation
+
+Metrics remain labeled by job type.
+
+Queue isolation does not alter:
+
+Retry semantics
+
+DLQ behavior
+
+Idempotency guarantees
+
+Side-effect protection
+
+Isolation improves workload fairness without changing correctness guarantees.
+
+Phase 10 Outcome
+
+After Phase 10, the system now guarantees:
+
+Workload segmentation
+
+Independent queue backpressure
+
+Fair job scheduling across job types
+
+Predictable scaling behavior
+
+Safe extension for future job categories
+
+Phase 10 transitions the system from a monolithic queue processor to a workload-aware distributed job platform.
