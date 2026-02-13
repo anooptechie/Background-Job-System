@@ -693,6 +693,106 @@ Graceful lifecycle management
 
 The project now reflects real-world distributed job processing behavior.
 
+📊 Queue Depth Metrics & Backpressure Detection (Phase 12)
+
+Phase 12 introduces queue depth monitoring to provide real-time visibility into workload pressure.
+
+Why This Matters
+
+Before Phase 12, the system measured:
+
+Job counts
+
+Failures
+
+Latency
+
+But it did not measure backlog.
+
+This made it impossible to detect:
+
+Queue buildup
+
+Under-provisioned workloads
+
+Traffic spikes
+
+Retry storms
+
+New Metrics
+
+For each queue:
+
+queue_waiting_jobs
+
+queue_active_jobs
+
+queue_delayed_jobs
+
+Accessible via:
+
+GET /metrics
+
+Example Output
+queue_waiting_jobs{queue="report-queue"} 12
+queue_active_jobs{queue="report-queue"} 2
+queue_waiting_jobs{queue="email-queue"} 0
+
+
+This immediately shows:
+
+Report queue is under pressure.
+
+Email queue is unaffected.
+
+Isolation is working correctly.
+
+How It Works
+
+Metrics are polled every 5 seconds.
+
+Collection is non-blocking.
+
+Polling stops during graceful shutdown.
+
+Metrics are labeled per queue.
+
+Operational Benefits
+
+Queue depth metrics enable:
+
+Intelligent scaling decisions
+
+Alert threshold configuration
+
+Workload imbalance detection
+
+Capacity planning
+
+Backpressure awareness
+
+With Phase 12 complete, the system now supports execution safety, lifecycle safety, and operational intelligence.
+
+🎯 Where You Are Now
+
+You have built a system that supports:
+
+Workload isolation
+
+Distributed scaling
+
+Retry safety
+
+DLQ & replay
+
+Graceful shutdown
+
+Observability
+
+Backpressure detection
+
+This is now a legitimate distributed job processing platform.
+
 
 ---
 

@@ -2,6 +2,10 @@ const client = require("prom-client");
 
 client.collectDefaultMetrics();
 
+/* =============================
+   Existing Metrics
+============================= */
+
 const jobCounter = new client.Counter({
   name: "jobs_total",
   help: "Total jobs processed",
@@ -21,9 +25,34 @@ const dlqCounter = new client.Counter({
   labelNames: ["type"],
 });
 
+/* =============================
+   Phase 12 — Queue Depth Metrics
+============================= */
+
+const queueWaitingGauge = new client.Gauge({
+  name: "queue_waiting_jobs",
+  help: "Number of waiting jobs per queue",
+  labelNames: ["queue"],
+});
+
+const queueActiveGauge = new client.Gauge({
+  name: "queue_active_jobs",
+  help: "Number of active jobs per queue",
+  labelNames: ["queue"],
+});
+
+const queueDelayedGauge = new client.Gauge({
+  name: "queue_delayed_jobs",
+  help: "Number of delayed jobs per queue",
+  labelNames: ["queue"],
+});
+
 module.exports = {
   client,
   jobCounter,
   jobDuration,
   dlqCounter,
+  queueWaitingGauge,
+  queueActiveGauge,
+  queueDelayedGauge,
 };

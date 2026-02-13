@@ -1,7 +1,14 @@
 const { Worker } = require("bullmq");
 const connection = require("../shared/redis");
 const logger = require("../shared/logger");
-const { jobCounter, jobDuration, dlqCounter } = require("../shared/metrics");
+const {
+  jobCounter,
+  jobDuration,
+  dlqCounter,
+  queueWaitingGauge,
+  queueActiveGauge,
+  queueDelayedGauge,
+} = require("../shared/metrics");
 const deadLetterQueue = require("../api/queue/deadLetterQueue");
 const { queues } = require("../api/queue/queueRegistry");
 
@@ -115,14 +122,10 @@ const queueConcurrency = {
 const workers = [];
 
 Object.values(queues).forEach((queue) => {
-  const worker = new Worker(
-    queue.name,
-    processJob,
-    {
-      connection,
-      concurrency: queueConcurrency[queue.name] || 1,
-    }
-  );
+  const worker = new Worker(queue.name, processJob, {
+    connection,
+    concurrency: queueConcurrency[queue.name] || 1,
+  });
 
   workers.push(worker);
 
@@ -163,6 +166,31 @@ Object.values(queues).forEach((queue) => {
 });
 
 /* =============================
+   Phase 12 — Queue Depth Polling
+============================= */
+
+const QUEUE_METRICS_INTERVAL = 5000;
+
+const metricsInterval = setInterval(async () => {
+  try {
+    for (const queue of Object.values(queues)) {
+      const waiting = await queue.getWaitingCount();
+      const active = await queue.getActiveCount();
+      const delayed = await queue.getDelayedCount();
+
+      queueWaitingGauge.set({ queue: queue.name }, waiting);
+      queueActiveGauge.set({ queue: queue.name }, active);
+      queueDelayedGauge.set({ queue: queue.name }, delayed);
+    }
+  } catch (err) {
+    logger.error(
+      { err: err.message },
+      "queue.metrics_collection_failed"
+    );
+  }
+}, QUEUE_METRICS_INTERVAL);
+
+/* =============================
    Graceful Shutdown
 ============================= */
 
@@ -175,15 +203,14 @@ async function shutdown(signal) {
   logger.info({ signal }, "worker.shutdown_initiated");
 
   try {
-    // Stop accepting new jobs and wait for active jobs to finish
+    clearInterval(metricsInterval);
+
     await Promise.all(workers.map((worker) => worker.close()));
 
-    // Close metrics server
     await new Promise((resolve) =>
       metricsServer.close(resolve)
     );
 
-    // Close Redis connection
     await connection.quit();
 
     logger.info("worker.shutdown_complete");

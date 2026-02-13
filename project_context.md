@@ -814,3 +814,121 @@ Clean metrics server shutdown
 Deterministic process termination
 
 Phase 11 transitions the worker from development-safe to production-safe lifecycle management.
+
+Queue Depth Metrics & Backpressure Awareness (Phase 12)
+
+Phase 12 introduces queue depth metrics to provide operational visibility into workload pressure and backlog growth.
+
+Until this phase, the system tracked:
+
+Total jobs processed
+
+Failures
+
+Execution latency
+
+DLQ events
+
+However, it lacked visibility into queue buildup and active workload pressure.
+
+Problem Addressed
+
+Without queue depth metrics:
+
+It is impossible to detect backlog growth.
+
+Under-provisioned queues cannot be identified.
+
+Heavy workloads cannot be distinguished from normal traffic.
+
+Scaling decisions are reactive rather than data-driven.
+
+Phase 12 resolves this by exposing real-time queue depth metrics.
+
+Metrics Introduced
+
+For each queue:
+
+queue_waiting_jobs
+
+queue_active_jobs
+
+queue_delayed_jobs
+
+All metrics are labeled by queue name.
+
+Example:
+
+queue_waiting_jobs{queue="report-queue"} 8
+queue_active_jobs{queue="report-queue"} 2
+queue_delayed_jobs{queue="report-queue"} 0
+
+Collection Strategy
+
+Queue counts are polled at a fixed interval (5 seconds) using non-blocking asynchronous calls.
+
+Key properties:
+
+Metrics collection does not block job processing.
+
+Metrics polling is cleared during graceful shutdown.
+
+Redis load impact is minimal and controlled.
+
+Worker processing remains unaffected.
+
+Operational Impact
+
+Queue depth metrics enable:
+
+Detection of workload backpressure
+
+Identification of under-provisioned queues
+
+Fair workload isolation validation
+
+Scaling decisions based on real backlog data
+
+Alert threshold configuration
+
+For example:
+
+If:
+
+queue_waiting_jobs{queue="report-queue"} 75
+
+
+And:
+
+queue_waiting_jobs{queue="email-queue"} 0
+
+
+This indicates report queue pressure without affecting email workload — validating isolation behavior introduced in Phase 10.
+
+Scaling Model Enhancement
+
+With Phase 12, scaling is now informed by:
+
+Per-queue backlog
+
+Active concurrency limits
+
+Latency trends
+
+Failure rates
+
+The system transitions from reactive scaling to observable, data-driven scaling.
+
+Phase 12 Outcome
+
+After Phase 12, the system now provides:
+
+Full workload visibility
+
+Backpressure awareness
+
+Queue-level operational intelligence
+
+Observability aligned with distributed system best practices
+
+The system now supports informed scaling rather than blind scaling.
