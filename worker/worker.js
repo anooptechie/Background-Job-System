@@ -18,7 +18,7 @@ const { client } = require("../shared/metrics");
 logger.info("worker.started");
 
 /* =============================
-   Redis Connection Observability
+   Redis Observability
 ============================= */
 
 connection.on("connect", () => {
@@ -110,27 +110,46 @@ async function processJob(job) {
 }
 
 /* =============================
-   Start Workers (Per Queue)
+   Phase 13 — Concurrency + Rate Limiting
 ============================= */
 
-const queueConcurrency = {
-  "email-queue": 3,
-  "report-queue": 2,
-  "cleanup-queue": 1,
+const queueConfig = {
+  "email-queue": {
+    concurrency: 3,
+    limiter: { max: 5, duration: 1000 }, // 5 jobs/sec
+  },
+  "report-queue": {
+    concurrency: 2,
+    limiter: { max: 2, duration: 1000 }, // 2 jobs/sec
+  },
+  "cleanup-queue": {
+    concurrency: 1,
+    limiter: { max: 1, duration: 1000 }, // 1 job/sec
+  },
 };
 
 const workers = [];
 
 Object.values(queues).forEach((queue) => {
+  const config = queueConfig[queue.name] || {
+    concurrency: 1,
+    limiter: { max: 1, duration: 1000 },
+  };
+
   const worker = new Worker(queue.name, processJob, {
     connection,
-    concurrency: queueConcurrency[queue.name] || 1,
+    concurrency: config.concurrency,
+    limiter: config.limiter,
   });
 
   workers.push(worker);
 
   logger.info(
-    { queue: queue.name, concurrency: queueConcurrency[queue.name] || 1 },
+    {
+      queue: queue.name,
+      concurrency: config.concurrency,
+      limiter: config.limiter,
+    },
     "worker.queue_started"
   );
 
@@ -173,15 +192,19 @@ const QUEUE_METRICS_INTERVAL = 5000;
 
 const metricsInterval = setInterval(async () => {
   try {
-    for (const queue of Object.values(queues)) {
-      const waiting = await queue.getWaitingCount();
-      const active = await queue.getActiveCount();
-      const delayed = await queue.getDelayedCount();
+    await Promise.all(
+      Object.values(queues).map(async (queue) => {
+        const [waiting, active, delayed] = await Promise.all([
+          queue.getWaitingCount(),
+          queue.getActiveCount(),
+          queue.getDelayedCount(),
+        ]);
 
-      queueWaitingGauge.set({ queue: queue.name }, waiting);
-      queueActiveGauge.set({ queue: queue.name }, active);
-      queueDelayedGauge.set({ queue: queue.name }, delayed);
-    }
+        queueWaitingGauge.set({ queue: queue.name }, waiting);
+        queueActiveGauge.set({ queue: queue.name }, active);
+        queueDelayedGauge.set({ queue: queue.name }, delayed);
+      })
+    );
   } catch (err) {
     logger.error(
       { err: err.message },

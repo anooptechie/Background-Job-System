@@ -932,3 +932,108 @@ Queue-level operational intelligence
 Observability aligned with distributed system best practices
 
 The system now supports informed scaling rather than blind scaling.
+
+Per-Queue Rate Limiting & Throughput Control (Phase 13)
+
+Phase 13 introduces rate limiting at the worker level to control job execution velocity and protect downstream dependencies from overload.
+
+Prior phases introduced concurrency limits, but concurrency alone does not control how frequently new jobs begin execution. Without rate limiting, horizontally scaled workers could overwhelm external services such as email providers, databases, or third-party APIs.
+
+Phase 13 resolves this by enforcing per-queue execution rate limits.
+
+Problem Addressed
+
+Concurrency limits control parallel execution, but do not restrict execution frequency.
+
+Without rate limiting:
+
+Workers can start jobs faster than downstream systems can handle.
+
+Horizontal scaling multiplies execution velocity uncontrollably.
+
+External services may throttle, fail, or degrade.
+
+Retry storms can amplify system load.
+
+Rate limiting ensures execution velocity remains within safe operational bounds.
+
+Rate Limiting Model
+
+Rate limiting is configured per queue using BullMQ’s native limiter mechanism.
+
+Each queue defines:
+
+Maximum number of jobs allowed per duration window
+
+Independent execution velocity constraints
+
+Example configuration:
+
+email-queue → 5 jobs per second
+
+report-queue → 2 jobs per second
+
+cleanup-queue → 1 job per second
+
+This ensures workload-specific throughput control.
+
+Concurrency vs Rate Limiting
+
+Concurrency and rate limiting control different dimensions:
+
+Concurrency limits:
+
+Maximum number of simultaneous jobs
+
+Rate limits:
+
+Maximum number of jobs started per time interval
+
+Both mechanisms work together to shape workload execution safely.
+
+Isolation Guarantees Under Rate Limiting
+
+Because queues are isolated (Phase 10):
+
+Rate limits apply independently per queue
+
+Heavy workloads cannot throttle unrelated queues
+
+Email jobs remain unaffected by report job throttling
+
+Cleanup operations remain isolated from other workloads
+
+This preserves workload independence while enforcing throughput control.
+
+Operational Impact
+
+Rate limiting enables:
+
+Protection of downstream systems
+
+Controlled execution velocity
+
+Safe horizontal scaling
+
+Retry storm containment
+
+Predictable workload execution behavior
+
+This transitions the system from unconstrained execution to controlled throughput execution.
+
+Phase 13 Outcome
+
+After Phase 13, the system now provides:
+
+Workload isolation
+
+Concurrency control
+
+Backpressure visibility
+
+Graceful lifecycle management
+
+Throughput control via rate limiting
+
+The system now supports safe, scalable, and controlled distributed job execution aligned with production-grade system design principles.
+

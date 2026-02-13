@@ -793,6 +793,80 @@ Backpressure detection
 
 This is now a legitimate distributed job processing platform.
 
+🚦 Per-Queue Rate Limiting & Throughput Control (Phase 13)
+
+Phase 13 introduces per-queue rate limiting to control how frequently jobs begin execution.
+
+This protects downstream services from overload and ensures predictable workload execution.
+
+Why Rate Limiting Matters
+
+Concurrency limits control how many jobs run simultaneously.
+
+Rate limits control how fast jobs start.
+
+Without rate limiting, scaling workers can overwhelm:
+
+Email providers
+
+Databases
+
+External APIs
+
+Internal services
+
+Rate limiting ensures execution remains within safe limits.
+
+Queue Rate Limits
+
+Each queue has independent rate limits:
+
+Queue	Concurrency	Rate Limit
+email-queue	3	5 jobs/sec
+report-queue	2	2 jobs/sec
+cleanup-queue	1	1 job/sec
+
+This enables workload-aware throughput control.
+
+Example Behavior
+
+If 20 report jobs are submitted instantly:
+
+Only 2 jobs start per second
+
+Remaining jobs wait safely in the queue
+
+Email and cleanup queues remain unaffected
+
+This prevents report workload from overwhelming system resources.
+
+Isolation + Rate Limiting
+
+Because queues are isolated:
+
+Rate limiting applies independently per workload
+
+Email processing remains unaffected by report workload pressure
+
+Cleanup jobs remain independently controlled
+
+This ensures safe and predictable distributed execution.
+
+Operational Benefits
+
+Rate limiting enables:
+
+Safe horizontal scaling
+
+Dependency protection
+
+Retry storm containment
+
+Controlled execution velocity
+
+Production-safe workload management
+
+With Phase 13 complete, the system now supports safe, observable, and controlled distributed job execution.
 
 ---
 
