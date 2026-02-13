@@ -1037,3 +1037,144 @@ Throughput control via rate limiting
 
 The system now supports safe, scalable, and controlled distributed job execution aligned with production-grade system design principles.
 
+Integrated Operational Observability (Phase 14 – BullBoard)
+
+Phase 14 introduces a centralized operational dashboard to provide real-time inspection and management of all job queues.
+
+As the system scaled in complexity, reliance on logs and Redis CLI became insufficient for efficient debugging and operational control.
+
+BullBoard was integrated into the existing Express API server to provide a unified entry point for both API traffic and human operational interaction.
+
+Architectural Integration
+
+Mounted at /admin/queues
+
+Uses ExpressAdapter
+
+Uses BullMQAdapter
+
+Dynamically maps queues from queueRegistry
+
+Includes dead-letter-queue
+
+This ensures minimal overhead when new queues are added.
+
+Operational Capabilities
+
+Real-Time Inspection:
+
+View job payloads
+
+Track state transitions
+
+Inspect failure stack traces
+
+Monitor retry attempts
+
+Manual Intervention:
+
+Retry failed jobs
+
+Remove poison-pill jobs
+
+Clean queue states
+
+Inspect DLQ entries
+
+Cluster-Wide Visibility:
+
+Because the dashboard connects directly to Redis, it reflects the global state of all workers regardless of deployment topology.
+
+Secured Operational Surface (Phase 14.1)
+
+Phase 14.1 secures the BullBoard dashboard using Basic Authentication middleware.
+
+Security Controls
+
+Route protection via basicAuth middleware
+
+Credentials defined via environment variables
+
+No hardcoded secrets
+
+Unauthorized access returns HTTP 401
+
+Operational Impact
+
+Phase 14 and 14.1 together provide:
+
+Reduced debugging time
+
+Interactive operational recovery
+
+Controlled administrative access
+
+Secure management interface
+
+The system now includes both programmatic and authenticated human-operable observability layers.
+
+Payload Validation & System Boundary Hardening (Phase 15)
+
+Phase 15 formalizes the API boundary by introducing structured payload validation using Zod.
+
+Prior to this phase, validation logic relied on manual conditional checks. While functional, this approach was brittle and less expressive.
+
+Phase 15 replaces manual validation with schema-driven enforcement.
+
+Architectural Motivation
+
+Distributed systems must protect internal components from untrusted input.
+
+Without strict boundary validation:
+
+Invalid jobs enter Redis
+
+Workers process malformed data
+
+DLQ contains user errors
+
+Observability signals become polluted
+
+Phase 15 establishes a clear trust boundary at the API layer.
+
+Design Principles
+
+Validation occurs before enqueue
+
+Each job type has a dedicated schema
+
+Validation is centralized and extensible
+
+Invalid requests are rejected with 400
+
+Worker logic assumes validated payloads
+
+Domain Enforcement
+
+Schemas enforce:
+
+Required fields per job type
+
+Proper data types
+
+Email format validation
+
+Optional test flags (forceFail)
+
+This formalizes domain contracts between producers and consumers.
+
+System Impact
+
+Phase 15:
+
+Protects Redis from malformed data
+
+Prevents unnecessary DLQ entries
+
+Preserves metric accuracy
+
+Reduces wasted compute
+
+Strengthens overall system integrity
+
+With Phase 15 complete, the system now has a hardened input boundary aligned with production-grade backend practices.

@@ -1,49 +1,21 @@
 const { addJob, getJobById } = require("../queue/jobQueue");
+const { jobSchemas } = require("../validation/jobSchemas");
 
-function validatePayload(type, payload) {
-  switch (type) {
-    case "welcome-email":
-      if (
-        !payload.email ||
-        typeof payload.email !== "string" ||
-        payload.email.trim().length === 0
-      ) {
-        return "payload.email is required and must be a non-empty string";
-      }
-      return null;
-
-    case "generate-report":
-      if (
-        !payload.reportType ||
-        typeof payload.reportType !== "string"
-      ) {
-        return "payload.reportType is required for generate-report";
-      }
-      return null;
-
-    case "cleanup-temp":
-      if (
-        !payload.directory ||
-        typeof payload.directory !== "string"
-      ) {
-        return "payload.directory is required for cleanup-temp";
-      }
-      return null;
-
-    default:
-      return `Unsupported job type: ${type}`;
-  }
-}
+/* ======================================
+   Create Job (Validated)
+====================================== */
 
 async function createJob(req, res) {
   const { type, payload, idempotencyKey } = req.body;
 
+  // Basic field presence check
   if (!type || !payload || !idempotencyKey) {
     return res.status(400).json({
       error: "Job type, payload and idempotencyKey are required",
     });
   }
 
+  // idempotencyKey validation
   if (
     typeof idempotencyKey !== "string" ||
     idempotencyKey.trim().length === 0
@@ -60,13 +32,27 @@ async function createJob(req, res) {
     });
   }
 
-  const validationError = validatePayload(type, payload);
-  if (validationError) {
-    return res.status(400).json({ error: validationError });
+  // Schema existence check
+  const schema = jobSchemas[type];
+
+  if (!schema) {
+    return res.status(400).json({
+      error: `Unsupported job type: ${type}`,
+    });
+  }
+
+  // Payload validation
+  const validation = schema.safeParse(payload);
+
+  if (!validation.success) {
+    return res.status(400).json({
+      error: "Invalid payload",
+      details: validation.error.flatten(),
+    });
   }
 
   try {
-    const job = await addJob(type, payload, idempotencyKey);
+    const job = await addJob(type, validation.data, idempotencyKey);
 
     return res.status(202).json({
       status: "accepted",
@@ -80,6 +66,10 @@ async function createJob(req, res) {
     });
   }
 }
+
+/* ======================================
+   Get Job Status
+====================================== */
 
 async function getJobStatus(req, res) {
   const { id } = req.params;

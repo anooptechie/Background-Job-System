@@ -1048,6 +1048,86 @@ Secure management interface
 
 The system now includes both programmatic and authenticated human-operable observability layers.
 
+🛡 Payload Validation & Boundary Hardening (Phase 15)
+
+Phase 15 introduces structured payload validation at the API level using Zod.
+
+Before this phase, malformed payloads could reach Redis, triggering unnecessary retries, DLQ pollution, and wasted worker resources.
+
+Phase 15 ensures only valid domain objects enter the system.
+
+Why This Matters
+
+Without API-level validation:
+
+Invalid jobs consume Redis memory
+
+Workers waste CPU cycles processing bad input
+
+DLQ becomes polluted with user errors
+
+Metrics become misleading
+
+Validation at the boundary keeps the queue system clean and stable.
+
+Implementation
+
+Centralized validation layer (jobSchemas.js)
+
+Zod schemas per job type
+
+Validation occurs before enqueue
+
+Invalid payloads return 400 Bad Request
+
+Unsupported job types are rejected immediately
+
+Example Behavior
+
+Invalid request:
+
+{
+  "type": "welcome-email",
+  "payload": {}
+}
+
+
+Response:
+
+400 Bad Request
+
+
+Valid request:
+
+{
+  "type": "welcome-email",
+  "idempotencyKey": "user-123",
+  "payload": {
+    "email": "user@example.com"
+  }
+}
+
+
+Response:
+
+202 Accepted
+
+System Impact
+
+After Phase 15:
+
+Redis stores only validated domain objects
+
+Workers process trusted payloads
+
+DLQ reflects true runtime failures
+
+Metrics represent actual system behavior
+
+System boundary is formally enforced
+
+This marks the transition from basic validation to structured boundary protection.
+
 ---
 
 ## ⚙️ Configuration
