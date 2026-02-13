@@ -25,6 +25,11 @@ const dlqCounter = new client.Counter({
   labelNames: ["type"],
 });
 
+const dlqSizeGauge = new client.Gauge({
+  name: "queue_dead_letter_size",
+  help: "Total number of jobs currently in the dead letter queue",
+});
+
 /* =============================
    Phase 12 — Queue Depth Metrics
 ============================= */
@@ -52,6 +57,7 @@ module.exports = {
   jobCounter,
   jobDuration,
   dlqCounter,
+  dlqSizeGauge,
   queueWaitingGauge,
   queueActiveGauge,
   queueDelayedGauge,

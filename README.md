@@ -868,6 +868,186 @@ Production-safe workload management
 
 With Phase 13 complete, the system now supports safe, observable, and controlled distributed job execution.
 
+🖥 Operational Dashboard (Phase 14 – BullBoard)
+
+Phase 14 introduces a centralized operational dashboard using BullBoard for real-time queue monitoring and management.
+
+Dashboard URL:
+
+http://localhost:3000/admin/queues
+
+Why This Was Needed
+
+As the system evolved to include:
+
+Multiple isolated queues
+
+Rate limiting
+
+DLQ handling
+
+Backpressure metrics
+
+Manual debugging via logs became inefficient.
+
+BullBoard provides a visual management layer for queue inspection and recovery.
+
+Features
+
+View job payloads
+
+Track lifecycle states (waiting → active → completed)
+
+Inspect error messages and stack traces
+
+Retry failed jobs
+
+Delete problematic jobs
+
+Clean completed/failed job sets
+
+Monitor dead-letter-queue entries
+
+Distributed Visibility
+
+Because BullBoard connects directly to Redis:
+
+It provides cluster-wide visibility
+
+Works across multiple workers
+
+Aggregates job states across deployments
+
+🔐 Secured Dashboard (Phase 14.1)
+
+Phase 14.1 secures the BullBoard dashboard with Basic Authentication.
+
+Environment variables:
+
+ADMIN_USER=<username>
+ADMIN_PASSWORD=<password>
+
+
+The dashboard is protected via middleware and cannot be accessed without valid credentials.
+
+Why Security Matters
+
+BullBoard allows:
+
+Retrying jobs
+
+Deleting jobs
+
+Cleaning queues
+
+Without authentication, this becomes a critical vulnerability.
+
+Phase 14.1 ensures:
+
+Controlled operational access
+
+No public exposure of management surface
+
+Environment-driven credential configuration
+
+System Maturity After Phase 14
+
+The system now supports:
+
+Isolation
+
+Concurrency control
+
+Rate limiting
+
+Backpressure visibility
+
+Graceful shutdown
+
+DLQ management
+
+Visual operational control
+
+Secured administrative access
+
+This transitions the system from backend job processor to operationally manageable distributed platform.
+
+Integrated Operational Observability (Phase 14 – BullBoard)
+
+Phase 14 introduces a centralized operational dashboard to provide real-time inspection and management of all job queues.
+
+As the system scaled in complexity, reliance on logs and Redis CLI became insufficient for efficient debugging and operational control.
+
+BullBoard was integrated into the existing Express API server to provide a unified entry point for both API traffic and human operational interaction.
+
+Architectural Integration
+
+Mounted at /admin/queues
+
+Uses ExpressAdapter
+
+Uses BullMQAdapter
+
+Dynamically maps queues from queueRegistry
+
+Includes dead-letter-queue
+
+This ensures minimal overhead when new queues are added.
+
+Operational Capabilities
+
+Real-Time Inspection:
+
+View job payloads
+
+Track state transitions
+
+Inspect failure stack traces
+
+Monitor retry attempts
+
+Manual Intervention:
+
+Retry failed jobs
+
+Remove poison-pill jobs
+
+Clean queue states
+
+Inspect DLQ entries
+
+Cluster-Wide Visibility:
+
+Because the dashboard connects directly to Redis, it reflects the global state of all workers regardless of deployment topology.
+
+Secured Operational Surface (Phase 14.1)
+
+Phase 14.1 secures the BullBoard dashboard using Basic Authentication middleware.
+
+Security Controls
+
+Route protection via basicAuth middleware
+
+Credentials defined via environment variables
+
+No hardcoded secrets
+
+Unauthorized access returns HTTP 401
+
+Operational Impact
+
+Phase 14 and 14.1 together provide:
+
+Reduced debugging time
+
+Interactive operational recovery
+
+Controlled administrative access
+
+Secure management interface
+
+The system now includes both programmatic and authenticated human-operable observability layers.
+
 ---
 
 ## ⚙️ Configuration

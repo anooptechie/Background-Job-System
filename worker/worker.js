@@ -8,6 +8,7 @@ const {
   queueWaitingGauge,
   queueActiveGauge,
   queueDelayedGauge,
+  dlqSizeGauge, // ✅ FIXED: Added missing import
 } = require("../shared/metrics");
 const deadLetterQueue = require("../api/queue/deadLetterQueue");
 const { queues } = require("../api/queue/queueRegistry");
@@ -64,10 +65,7 @@ metricsServer.listen(METRICS_PORT, () => {
 async function processJob(job) {
   const startTime = Date.now();
 
-  logger.info(
-    { jobId: job.id, jobType: job.name },
-    "job.started"
-  );
+  logger.info({ jobId: job.id, jobType: job.name }, "job.started");
 
   if (job.data?.forceFail === true) {
     logger.warn({ jobId: job.id }, "job.forced_failure");
@@ -116,15 +114,15 @@ async function processJob(job) {
 const queueConfig = {
   "email-queue": {
     concurrency: 3,
-    limiter: { max: 5, duration: 1000 }, // 5 jobs/sec
+    limiter: { max: 5, duration: 1000 },
   },
   "report-queue": {
     concurrency: 2,
-    limiter: { max: 2, duration: 1000 }, // 2 jobs/sec
+    limiter: { max: 2, duration: 1000 },
   },
   "cleanup-queue": {
     concurrency: 1,
-    limiter: { max: 1, duration: 1000 }, // 1 job/sec
+    limiter: { max: 1, duration: 1000 },
   },
 };
 
@@ -150,16 +148,13 @@ Object.values(queues).forEach((queue) => {
       concurrency: config.concurrency,
       limiter: config.limiter,
     },
-    "worker.queue_started"
+    "worker.queue_started",
   );
 
   worker.on("failed", async (job, err) => {
     jobCounter.inc({ status: "failed", type: job.name });
 
-    logger.error(
-      { jobId: job.id, err: err.message },
-      "job.failed"
-    );
+    logger.error({ jobId: job.id, err: err.message }, "job.failed");
 
     const attemptsMade = job.attemptsMade;
     const maxAttempts = job.opts.attempts || 3;
@@ -177,10 +172,7 @@ Object.values(queues).forEach((queue) => {
 
     dlqCounter.inc({ type: job.name });
 
-    logger.error(
-      { jobId: job.id, attemptsMade },
-      "job.moved_to_dlq"
-    );
+    logger.error({ jobId: job.id, attemptsMade }, "job.moved_to_dlq");
   });
 });
 
@@ -203,13 +195,15 @@ const metricsInterval = setInterval(async () => {
         queueWaitingGauge.set({ queue: queue.name }, waiting);
         queueActiveGauge.set({ queue: queue.name }, active);
         queueDelayedGauge.set({ queue: queue.name }, delayed);
-      })
+      }),
     );
+
+    //This will now work because dlqSizeGauge is imported
+    const dlqCount = await deadLetterQueue.getWaitingCount();
+    dlqSizeGauge.set(dlqCount);
+    
   } catch (err) {
-    logger.error(
-      { err: err.message },
-      "queue.metrics_collection_failed"
-    );
+    logger.error({ err: err.message }, "queue.metrics_collection_failed");
   }
 }, QUEUE_METRICS_INTERVAL);
 
@@ -230,9 +224,7 @@ async function shutdown(signal) {
 
     await Promise.all(workers.map((worker) => worker.close()));
 
-    await new Promise((resolve) =>
-      metricsServer.close(resolve)
-    );
+    await new Promise((resolve) => metricsServer.close(resolve));
 
     await connection.quit();
 
