@@ -5,10 +5,12 @@ if (!process.env.REDIS_URL) {
   throw new Error("REDIS_URL is not defined");
 }
 
-const connection = new IORedis(process.env.REDIS_URL, {
-  maxRetriesPerRequest: null,
-  tls: {}, // REQUIRED for Upstash (even with redis://)
-});
+const redisUrl = process.env.REDIS_URL;
+
+const connection =
+  redisUrl.startsWith("rediss://")
+    ? new IORedis(redisUrl, { maxRetriesPerRequest: null, tls: {} })
+    : new IORedis(redisUrl, { maxRetriesPerRequest: null });
 
 connection.on("connect", () => {
   console.log("✅ Redis connected");
@@ -19,5 +21,3 @@ connection.on("error", (err) => {
 });
 
 module.exports = connection;
-
-//Redis connection provided via environment variables
