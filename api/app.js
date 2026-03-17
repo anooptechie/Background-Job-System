@@ -75,6 +75,9 @@ app.get("/metrics", async (req, res) => {
   res.end(await client.register.metrics());
 });
 
+app.get("/", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
 /* =========================================
    🚀 Start Server
 ========================================= */
