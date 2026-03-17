@@ -62,6 +62,7 @@ describe("Background Job System", () => {
 
     let status;
 
+    // Poll up to ~10 seconds
     for (let i = 0; i < 20; i++) {
       const res = await request(BASE_URL).get(`/jobs/${jobId}/status`);
 
@@ -75,5 +76,5 @@ describe("Background Job System", () => {
     }
 
     expect(status).toBe("completed");
-  });
+  }, 15000); // Increased timeout for CI environments
 });
