@@ -3,7 +3,6 @@ const request = require("supertest");
 const BASE_URL = "http://localhost:3000";
 
 describe("Background Job System", () => {
-
   // ✅ Test 1 — Health check
   it("should return 200 for health endpoint", async () => {
     const res = await request(BASE_URL).get("/");
@@ -19,8 +18,8 @@ describe("Background Job System", () => {
         type: "welcome-email",
         idempotencyKey: "test-ci-1",
         payload: {
-          email: "test@example.com"
-        }
+          email: "test@example.com",
+        },
       });
 
     expect(res.statusCode).toBe(202);
@@ -34,17 +33,47 @@ describe("Background Job System", () => {
         type: "generate-report",
         idempotencyKey: "test-ci-2",
         payload: {
-          reportType: "monthly-sales"
-        }
+          reportType: "monthly-sales",
+        },
       });
 
     expect(res.statusCode).toBe(202);
 
     // wait for worker to process
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // If system didn't crash, test passes
-    expect(true).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   });
 
+  // ✅ Test 4 — Job status endpoint
+  it("should process job and reach completed state", async () => {
+    const createRes = await request(BASE_URL)
+      .post("/jobs")
+      .send({
+        type: "welcome-email",
+        idempotencyKey: "ci-test-3",
+        payload: {
+          email: "test@example.com",
+        },
+      });
+
+    expect(createRes.statusCode).toBe(202);
+
+    const jobId = createRes.body.jobId;
+    expect(jobId).toBeDefined();
+
+    let status;
+
+    for (let i = 0; i < 20; i++) {
+      const res = await request(BASE_URL).get(`/jobs/${jobId}/status`);
+
+      expect(res.statusCode).toBe(200);
+
+      status = res.body.status;
+
+      if (status === "completed") break;
+
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    expect(status).toBe("completed");
+  });
 });
