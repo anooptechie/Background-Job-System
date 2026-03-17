@@ -8,7 +8,8 @@
     "start:worker": "node -r dotenv/config worker/worker.js",
     "dev:server": "nodemon -r dotenv/config api/app.js",
     "dev:worker": "nodemon -r dotenv/config worker/worker.js",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:worker\""
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:worker\"",
+    "test": "jest"
   },
   "keywords": [],
   "author": "",
@@ -28,6 +29,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "nodemon": "^3.1.11"
+    "jest": "^30.3.0",
+    "nodemon": "^3.1.11",
+    "supertest": "^7.2.2"
   }
 }

@@ -1178,3 +1178,199 @@ Reduces wasted compute
 Strengthens overall system integrity
 
 With Phase 15 complete, the system now has a hardened input boundary aligned with production-grade backend practices.
+
+🧱 Phase 16 — Dockerised Deployment
+Dockerised Deployment & Environment Standardisation (Phase 16)
+
+Phase 16 introduces containerisation using Docker, transforming the system from a local development setup into a reproducible, environment-independent deployment.
+
+Architectural Motivation
+
+Prior to this phase, the system relied on:
+
+Local Node.js execution (npm run dev)
+
+External Redis setup
+
+Environment-specific configuration
+
+This approach lacked consistency across environments and made it difficult to simulate real distributed deployments.
+
+Phase 16 standardises the runtime environment using containers.
+
+System Topology
+
+The system is now composed of multiple containers orchestrated via Docker Compose:
+
+API Container
+     │
+     ▼
+Redis Container
+     │
+     ▼
+Worker Container(s)
+
+Each component runs in isolation while communicating over a shared Docker network.
+
+Key Changes
+
+Introduced Dockerfile for Node.js application
+
+Introduced docker-compose.yml for multi-service orchestration
+
+Added .dockerignore to optimise build context
+
+Externalised Redis connection via REDIS_URL
+
+Enabled service discovery using Docker network (redis hostname)
+
+Environment Behaviour
+
+API and Worker containers connect to Redis using:
+
+redis://redis:6379
+
+Docker Compose manages service lifecycle and networking
+
+System can be started with:
+
+docker compose up
+Horizontal Scaling
+
+Workers can now be scaled independently:
+
+docker compose up --scale worker=3
+
+This enables:
+
+parallel job processing
+
+workload distribution
+
+realistic simulation of distributed systems
+
+System Impact
+
+Phase 16 enables:
+
+environment consistency across machines
+
+production-like execution locally and in CI
+
+horizontal scaling of workers
+
+simplified onboarding and setup
+
+foundation for automated testing and deployment pipelines
+
+This phase marks the transition from a development system to a deployable architecture.
+
+⚙️ Phase 17 — Continuous Integration (CI)
+Continuous Integration & Automated System Validation (Phase 17)
+
+Phase 17 introduces a CI pipeline using GitHub Actions to automatically validate the system on every code change.
+
+Architectural Motivation
+
+Prior to this phase, system validation was manual:
+
+Developers ran the system locally
+
+Tested via Postman or logs
+
+No automated safeguards existed
+
+This made the system prone to:
+
+unnoticed regressions
+
+broken deployments
+
+environment inconsistencies
+
+Phase 17 automates validation.
+
+CI Workflow Overview
+
+On every push or pull request:
+
+GitHub Actions Runner
+        ↓
+Checkout Repository
+        ↓
+Build Docker Images
+        ↓
+Start Services (API + Worker + Redis)
+        ↓
+Run Integration Tests
+        ↓
+Pass / Fail
+Key Components
+
+.github/workflows/ci.yml — CI configuration
+
+Docker-based test execution environment
+
+Health check endpoint (GET /)
+
+Integration test suite using Jest + Supertest
+
+Validation Strategy
+
+The CI pipeline verifies:
+
+1. System Startup
+
+Docker containers build successfully
+
+API and worker services start without errors
+
+2. API Availability
+
+Health endpoint responds successfully
+
+3. Job Submission
+
+Valid job requests are accepted (202 Accepted)
+
+4. Worker Stability
+
+Jobs are processed without runtime failures
+
+Testing Approach
+
+Initial tests follow a black-box integration testing model:
+
+Interact only via API endpoints
+
+Do not depend on internal implementation details
+
+Validate system behaviour from an external perspective
+
+This ensures stability even during internal refactoring.
+
+System Impact
+
+Phase 17 introduces:
+
+automated regression detection
+
+reproducible testing environments via Docker
+
+confidence in code changes before deployment
+
+reduced manual testing effort
+
+foundation for advanced testing (DLQ, retries, idempotency)
+
+Future Extensions
+
+DLQ behaviour validation tests
+
+Idempotency enforcement tests
+
+Retry/backoff verification
+
+Performance/load testing
+
+Docker image publishing

@@ -1128,6 +1128,120 @@ System boundary is formally enforced
 
 This marks the transition from basic validation to structured boundary protection.
 
+Dockerised Deployment (Phase 16)
+
+Phase 16 introduces containerisation using Docker, transforming the system into a reproducible, environment-independent deployment.
+
+Why This Matters
+
+Before Docker:
+
+Required local Node.js setup
+
+Required manually running Redis
+
+Environment inconsistencies across machines
+
+After Docker:
+
+Entire system runs with a single command
+
+Consistent runtime across environments
+
+Easy simulation of distributed systems
+
+System Topology
+API Container → Redis Container → Worker Container(s)
+
+Each component runs in isolation and communicates via Docker networking.
+
+How to Run
+docker compose up
+Horizontal Scaling
+
+Workers can be scaled dynamically:
+
+docker compose up --scale worker=3
+
+This enables:
+
+Parallel job processing
+
+Load distribution across workers
+
+Realistic distributed system simulation
+
+Key Improvements
+
+Standardised environment across machines
+
+Simplified onboarding and setup
+
+Production-like execution locally
+
+Foundation for CI/CD pipelines
+
+⚙️ Continuous Integration (Phase 17)
+
+Phase 17 introduces a CI pipeline using GitHub Actions to automatically validate the system on every code change.
+
+Why This Matters
+
+Before CI:
+
+Testing was manual
+
+Errors could go unnoticed
+
+No automated validation
+
+After CI:
+
+Every push is automatically tested
+
+System is validated from scratch
+
+Prevents regressions
+
+CI Workflow
+
+On every push:
+
+Checkout code
+→ Build Docker containers
+→ Start API + Worker + Redis
+→ Run integration tests
+→ Pass / Fail
+What CI Validates
+
+Docker builds successfully
+
+Services start correctly
+
+API is reachable
+
+Jobs can be submitted
+
+Worker processes jobs without crashing
+
+Testing Approach
+
+Uses Jest + Supertest
+
+Follows black-box integration testing
+
+Tests system behavior via API endpoints
+
+Independent of internal implementation
+
+Example Checks
+
+GET / → API health check
+
+POST /jobs → job submission
+
+Worker processes jobs asynchronously
+
 ---
 
 ## ⚙️ Configuration
