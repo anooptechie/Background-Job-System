@@ -117,4 +117,43 @@ describe("Background Job System", () => {
     // ✅ CORE ASSERTION (your actual guarantee)
     expect(jobId2).toBe(jobId1);
   });
+
+  // ✅ Test 6 — Retry logic and failure handling
+  it("should retry a failed job and eventually move it to failed state", async () => {
+    const res = await request(BASE_URL)
+      .post("/jobs")
+      .send({
+        type: "generate-report",
+        idempotencyKey: "retry-test-" + Date.now(),
+        payload: {
+          reportType: "monthly-sales",
+          forceFail: true, // 👈 supported by your worker
+        },
+      });
+
+    expect(res.statusCode).toBe(202);
+
+    const jobId = res.body.jobId;
+    expect(jobId).toBeDefined();
+
+    let state;
+
+    // Poll up to ~40 seconds (important due to 10s backoff)
+    for (let i = 0; i < 40; i++) {
+      const statusRes = await request(BASE_URL).get(`/jobs/${jobId}/status`);
+
+      if (statusRes.statusCode !== 200) {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+
+      state = statusRes.body.state;
+
+      if (state === "failed") break;
+
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    expect(state).toBe("failed");
+  }, 45000); // ⬅️ IMPORTANT: must exceed retry duration
 });
