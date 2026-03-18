@@ -130,7 +130,7 @@ async function getDLQJobs(req, res) {
   }
 }
 
-// New function for replaying DLQ job
+// New function for replaying DLQ job and also to prevent infinite loops by removing any forceFail flags from the payload.
 async function replayDLQJob(req, res) {
   try {
     const { id } = req.params;
@@ -143,10 +143,14 @@ async function replayDLQJob(req, res) {
 
     const { jobType, payload, originalJobId } = dlqJob.data;
 
+    // 🔥 Prevent infinite replay loop
+    const cleanedPayload = { ...payload };
+    delete cleanedPayload.forceFail;
+
     const newJob = await addJob(
       jobType,
       {
-        ...payload,
+        ...cleanedPayload,
         replayedFromJobId: originalJobId,
         replayedAt: new Date().toISOString(),
       },
