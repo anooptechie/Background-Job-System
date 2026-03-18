@@ -156,4 +156,45 @@ describe("Background Job System", () => {
 
     expect(state).toBe("failed");
   }, 45000); // ⬅️ IMPORTANT: must exceed retry duration
+
+  // ✅ Test 7 — Dead Letter Queue
+  it("should move failed job to DLQ after retries", async () => {
+    const res = await request(BASE_URL)
+      .post("/jobs")
+      .send({
+        type: "generate-report",
+        idempotencyKey: "dlq-test-" + Date.now(),
+        payload: {
+          reportType: "monthly-sales",
+          forceFail: true,
+        },
+      });
+
+    const jobId = res.body.jobId;
+
+    let state;
+
+    // wait until job fails
+    for (let i = 0; i < 40; i++) {
+      const statusRes = await request(BASE_URL).get(`/jobs/${jobId}/status`);
+      state = statusRes.body.state;
+
+      if (state === "failed") break;
+
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    expect(state).toBe("failed");
+
+    // check DLQ
+    const { Queue } = require("bullmq");
+    const connection = require("../shared/redis");
+    const dlq = new Queue("dead-letter-queue", { connection });
+
+    const jobs = await dlq.getJobs(["waiting"], 0, 10);
+
+    const found = jobs.find((j) => j.data.originalJobId === jobId);
+
+    expect(found).toBeDefined();
+  }, 45000);
 });
