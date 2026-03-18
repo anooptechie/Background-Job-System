@@ -106,22 +106,27 @@ async function getJobStatus(req, res) {
 }
 
 async function getDLQJobs(req, res) {
-  const jobs = await deadLetterQueue.getJobs(
-    ["waiting", "failed", "completed", "delayed"],
-    0,
-    20,
-  );
+  try {
+    const jobs = await deadLetterQueue.getJobs(
+      ["waiting", "failed", "completed", "delayed"],
+      0,
+      20,
+    );
 
-  const data = (jobs || []).map((job) => ({
-    id: job.id,
-    originalJobId: job.data.originalJobId,
-    type: job.data.jobType,
-    attemptsMade: job.data.attemptsMade,
-    failedReason: job.data.failedReason,
-    failedAt: job.data.failedAt,
-  }));
+    const data = (jobs || []).map((job) => ({
+      id: job.id,
+      originalJobId: job.data?.originalJobId,
+      type: job.data?.jobType,
+      attemptsMade: job.data?.attemptsMade,
+      failedReason: job.data?.failedReason,
+      failedAt: job.data?.failedAt,
+    }));
 
-  res.status(200).json(data);
+    res.status(200).json(data);
+  } catch (err) {
+    console.error("DLQ ERROR:", err.message);
+    res.status(500).json({ error: "Failed to fetch DLQ jobs" });
+  }
 }
 
 module.exports = {
