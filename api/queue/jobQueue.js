@@ -15,8 +15,8 @@ async function addJob(type, payload, idempotencyKey) {
   }
 
   const queue = getQueueByType(type);
-  // const jobId = toJobId(idempotencyKey);
-  const jobId = crypto.randomUUID(); // ❌ breaks idempotency
+  const jobId = toJobId(idempotencyKey);
+  // const jobId = crypto.randomUUID(); // ❌ breaks idempotency
 
   const job = await queue.add(type, payload, {
     jobId,
