@@ -106,9 +106,13 @@ async function getJobStatus(req, res) {
 }
 
 async function getDLQJobs(req, res) {
-  const jobs = await deadLetterQueue.getJobs(["waiting"], 0, 20);
+  const jobs = await deadLetterQueue.getJobs(
+    ["waiting", "failed", "completed", "delayed"],
+    0,
+    20,
+  );
 
-  const data = jobs.map((job) => ({
+  const data = (jobs || []).map((job) => ({
     id: job.id,
     originalJobId: job.data.originalJobId,
     type: job.data.jobType,
