@@ -1,5 +1,6 @@
 const { addJob, getJobById } = require("../queue/jobQueue");
 const { jobSchemas } = require("../validation/jobSchemas");
+const { deadLetterQueue } = require("../queue/deadLetterQueue");
 
 /* ======================================
    Create Job (Validated)
@@ -104,7 +105,23 @@ async function getJobStatus(req, res) {
   }
 }
 
+async function getDLQJobs(req, res) {
+  const jobs = await deadLetterQueue.getJobs(["waiting"], 0, 20);
+
+  const data = jobs.map((job) => ({
+    id: job.id,
+    originalJobId: job.data.originalJobId,
+    type: job.data.jobType,
+    attemptsMade: job.data.attemptsMade,
+    failedReason: job.data.failedReason,
+    failedAt: job.data.failedAt,
+  }));
+
+  res.status(200).json(data);
+}
+
 module.exports = {
   createJob,
   getJobStatus,
+  getDLQJobs,
 };

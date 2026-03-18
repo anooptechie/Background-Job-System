@@ -192,4 +192,12 @@ describe("Background Job System", () => {
 
     expect(state).toBe("failed");
   }, 45000);
+
+  // ✅ Test 8 — DLQ retrieval endpoint
+  it("should return DLQ jobs", async () => {
+    const res = await request(BASE_URL).get("/jobs/dlq");
+
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
 });
