@@ -200,4 +200,46 @@ describe("Background Job System", () => {
     expect(res.statusCode).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
   });
+
+  // ✅ Test 9 — DLQ replay endpoint
+  it("should replay a DLQ job", async () => {
+    // First create a failing job
+    const res = await request(BASE_URL)
+      .post("/jobs")
+      .send({
+        type: "generate-report",
+        idempotencyKey: "replay-test-" + Date.now(),
+        payload: {
+          reportType: "monthly-sales",
+          forceFail: true,
+        },
+      });
+
+    const jobId = res.body.jobId;
+
+    // wait until failed
+    let state;
+    for (let i = 0; i < 40; i++) {
+      const statusRes = await request(BASE_URL).get(`/jobs/${jobId}/status`);
+      state = statusRes.body.state;
+      if (state === "failed") break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    expect(state).toBe("failed");
+
+    // get DLQ jobs
+    const dlqRes = await request(BASE_URL).get("/jobs/dlq");
+    const dlqJob = dlqRes.body.find((j) => j.originalJobId === jobId);
+
+    expect(dlqJob).toBeDefined();
+
+    // replay it
+    const replayRes = await request(BASE_URL).post(
+      `/jobs/dlq/${dlqJob.id}/replay`,
+    );
+
+    expect(replayRes.statusCode).toBe(200);
+    expect(replayRes.body.jobId).toBeDefined();
+  }, 60000);
 });

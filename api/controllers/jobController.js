@@ -105,6 +105,7 @@ async function getJobStatus(req, res) {
   }
 }
 
+// New function to get DLQ jobs
 async function getDLQJobs(req, res) {
   try {
     const jobs = await deadLetterQueue.getJobs(
@@ -129,8 +130,43 @@ async function getDLQJobs(req, res) {
   }
 }
 
+// New function for replaying DLQ job
+async function replayDLQJob(req, res) {
+  try {
+    const { id } = req.params;
+
+    const dlqJob = await deadLetterQueue.getJob(id);
+
+    if (!dlqJob) {
+      return res.status(404).json({ error: "DLQ job not found" });
+    }
+
+    const { jobType, payload, originalJobId } = dlqJob.data;
+
+    const newJob = await addJob(
+      jobType,
+      {
+        ...payload,
+        replayedFromJobId: originalJobId,
+        replayedAt: new Date().toISOString(),
+      },
+      "replay-" + Date.now(),
+    );
+
+    return res.status(200).json({
+      message: "Job replayed successfully",
+      jobId: newJob.id,
+      replayedFrom: originalJobId,
+    });
+  } catch (err) {
+    console.error("Replay DLQ ERROR:", err);
+    return res.status(500).json({ error: "Failed to replay DLQ job" });
+  }
+}
+
 module.exports = {
   createJob,
   getJobStatus,
   getDLQJobs,
+  replayDLQJob,
 };
