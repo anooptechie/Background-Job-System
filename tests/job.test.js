@@ -40,7 +40,7 @@ describe("Background Job System", () => {
     expect(res.statusCode).toBe(202);
 
     // wait for worker to process
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // await new Promise((resolve) => setTimeout(resolve, 3000));
   });
 
   /// ✅ Test 4 — Job status endpoint (stable + defensive)
@@ -90,4 +90,31 @@ describe("Background Job System", () => {
     // Final assertion with clear failure message
     expect(status).toBe("completed");
   }, 20000); // ⬅️ Increased timeout for CI stability
+
+  // ✅ Test 5 — Idempotency
+  it("should return same jobId for same idempotencyKey", async () => {
+    const payload = {
+      type: "welcome-email",
+      idempotencyKey: "idem-test-1",
+      payload: {
+        email: "test@example.com",
+      },
+    };
+
+    // First request
+    const res1 = await request(BASE_URL).post("/jobs").send(payload);
+
+    expect(res1.statusCode).toBe(202);
+    const jobId1 = res1.body.jobId;
+    expect(jobId1).toBeDefined();
+
+    // Second request (same idempotencyKey)
+    const res2 = await request(BASE_URL).post("/jobs").send(payload);
+
+    expect(res2.statusCode).toBe(202);
+    const jobId2 = res2.body.jobId;
+
+    // ✅ CORE ASSERTION (your actual guarantee)
+    expect(jobId2).toBe(jobId1);
+  });
 });
