@@ -130,7 +130,7 @@ async function getDLQJobs(req, res) {
   }
 }
 
-// New function for replaying DLQ job and also to prevent infinite loops by removing any forceFail flags from the payload.
+// New function for replaying DLQ job and also to prevent infinite loops by removing any forceFail flags from the payload and also to track replay counts.
 async function replayDLQJob(req, res) {
   try {
     const { id } = req.params;
@@ -143,7 +143,16 @@ async function replayDLQJob(req, res) {
 
     const { jobType, payload, originalJobId } = dlqJob.data;
 
-    // 🔥 Prevent infinite replay loop
+    // 🔒 Replay limit protection
+    const replayCount = payload?.replayCount || 0;
+
+    if (replayCount >= 3) {
+      return res.status(400).json({
+        error: "Replay limit exceeded",
+      });
+    }
+
+    // 🔥 Prevent infinite failure loop
     const cleanedPayload = { ...payload };
     delete cleanedPayload.forceFail;
 
@@ -151,6 +160,7 @@ async function replayDLQJob(req, res) {
       jobType,
       {
         ...cleanedPayload,
+        replayCount: replayCount + 1, // 👈 track replays
         replayedFromJobId: originalJobId,
         replayedAt: new Date().toISOString(),
       },
@@ -161,6 +171,7 @@ async function replayDLQJob(req, res) {
       message: "Job replayed successfully",
       jobId: newJob.id,
       replayedFrom: originalJobId,
+      replayCount: replayCount + 1,
     });
   } catch (err) {
     console.error("Replay DLQ ERROR:", err);
