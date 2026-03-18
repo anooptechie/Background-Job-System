@@ -1,6 +1,6 @@
 const { addJob, getJobById } = require("../queue/jobQueue");
 const { jobSchemas } = require("../validation/jobSchemas");
-const { deadLetterQueue } = require("../queue/deadLetterQueue");
+const deadLetterQueue = require("../queue/deadLetterQueue");
 
 /* ======================================
    Create Job (Validated)
