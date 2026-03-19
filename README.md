@@ -541,6 +541,46 @@ Checkout → Build Docker Images → Start Services → Run Integration Tests �
 
 Tests follow a **black-box integration testing** model — they interact only via API endpoints and do not depend on internal implementation details. This ensures stability during refactoring and validates real-world system guarantees.
 
+## 🚀 Post-CI Enhancements
+
+After establishing a stable CI pipeline, the system was extended with the following production-grade capabilities:
+
+### 🔍 DLQ Observability
+- Exposed `GET /jobs/dlq` endpoint
+- Enabled inspection of failed jobs and failure metadata
+
+### ♻️ DLQ Replay Mechanism
+- Added `POST /jobs/dlq/:id/replay`
+- Implemented safeguards:
+  - replay limit (max 3 attempts)
+  - payload sanitization (removes failure triggers)
+  - replay tracking (`replayCount`, `replayedFromJobId`)
+
+### 🧵 Concurrency Control
+- Configured per-queue concurrency limits
+- Prevented worker overload by controlling parallel execution
+
+### ⚡ Rate Limiting
+- Applied queue-level rate limiting using BullMQ limiter
+- Controlled job intake under burst traffic conditions
+
+### 🧪 Load Testing & Validation
+- Simulated burst traffic using parallel requests
+- Verified:
+  - concurrency behavior
+  - rate limiting behavior
+
+### 🎯 Priority Scheduling
+- Introduced priority-based job execution
+- Ensured high-priority jobs are processed before lower-priority ones
+- Verified behavior under load
+
+### 🔎 Observability Improvements
+- Enhanced logging with:
+  - job priority
+  - execution tags (HIGH / LOW)
+- Improved traceability of job execution order
+
 ---
 
 ## Configuration

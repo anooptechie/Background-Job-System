@@ -780,6 +780,40 @@ The system now has:
 - Confidence in code changes before deployment
 - A foundation for advanced testing (load testing, retry verification, performance benchmarks)
 
+## Phase 18 — Post-CI System Enhancements
+
+After achieving stable CI validation, the system was extended to improve reliability, control, and observability.
+
+### Dead Letter Queue (DLQ)
+- Implemented API access to DLQ (`GET /jobs/dlq`)
+- Enabled inspection of failed jobs and metadata
+
+### DLQ Replay
+- Added replay endpoint (`POST /jobs/dlq/:id/replay`)
+- Introduced:
+  - replay count tracking
+  - replay limit enforcement (max 3)
+  - payload sanitization to prevent infinite failure loops
+
+### Concurrency Control
+- Configured per-queue worker concurrency
+- Ensured bounded parallel execution and system stability
+
+### Rate Limiting
+- Applied BullMQ limiter at queue level
+- Controlled job throughput under burst load conditions
+
+### Load Testing
+- Simulated high-throughput job submission using parallel requests
+- Verified system behavior under concurrency and rate limits
+
+### Priority Queues
+- Introduced priority-based scheduling (lower value = higher priority)
+- Verified that high-priority jobs are processed ahead of lower-priority jobs in waiting state
+
+### Observability
+- Enhanced logging with priority and execution tagging
+- Improved debugging and traceability of job execution order
+
 ---
 
-*This document reflects the complete architectural evolution of the system through Phase 17. Each phase builds on prior correctness and observability guarantees without compromising them.*
