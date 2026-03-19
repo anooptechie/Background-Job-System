@@ -1,6 +1,30 @@
 # PROJECT_CONTEXT.md
 
-This document captures stable architectural decisions and system behavior for the background job processing system. It excludes experimentation, debugging history, and implementation noise.
+This document captures stable architectural decisions, design principles, and phase-by-phase system evolution for the background job processing system. It excludes experimentation, debugging history, and implementation noise.
+
+---
+
+## Table of Contents
+
+- [Project Purpose](#project-purpose)
+- [Architecture Decisions](#architecture-decisions)
+- [Phase 1–2 — Job Lifecycle & Status API](#phase-12--job-lifecycle--status-api)
+- [Phase 3 — Failure Handling & Reliability](#phase-3--failure-handling--reliability)
+- [Phase 4 — Idempotency & Safety](#phase-4--idempotency--safety)
+- [Phase 5 — Background-Only & Scheduled Jobs](#phase-5--background-only--scheduled-jobs)
+- [Phase 6 — Observability & Monitoring](#phase-6--observability--monitoring)
+- [Phase 7 — Dead Letter Queue (DLQ)](#phase-7--dead-letter-queue-dlq)
+- [Phase 8 — DLQ Replay Semantics](#phase-8--dlq-replay-semantics)
+- [Phase 9 — Horizontal Scaling & Worker Concurrency](#phase-9--horizontal-scaling--worker-concurrency)
+- [Phase 10 — Multi-Queue Workload Isolation](#phase-10--multi-queue-workload-isolation)
+- [Phase 11 — Graceful Shutdown & Lifecycle Safety](#phase-11--graceful-shutdown--lifecycle-safety)
+- [Phase 12 — Queue Depth Metrics & Backpressure Awareness](#phase-12--queue-depth-metrics--backpressure-awareness)
+- [Phase 13 — Per-Queue Rate Limiting & Throughput Control](#phase-13--per-queue-rate-limiting--throughput-control)
+- [Phase 14 — Operational Dashboard (BullBoard)](#phase-14--operational-dashboard-bullboard)
+- [Phase 14.1 — Secured Dashboard](#phase-141--secured-dashboard)
+- [Phase 15 — Payload Validation & Boundary Hardening](#phase-15--payload-validation--boundary-hardening)
+- [Phase 16 — Dockerised Deployment](#phase-16--dockerised-deployment)
+- [Phase 17 — Continuous Integration](#phase-17--continuous-integration)
 
 ---
 
@@ -27,57 +51,31 @@ The system demonstrates production-grade background job processing beyond simple
 
 API and worker lifecycles are fully independent, enabling horizontal scaling and fault isolation.
 
----
+### Configuration Strategy
 
-## Job Lifecycle (Phase 2)
+All environment-specific configuration is externalized.
 
-Jobs have a well-defined lifecycle managed by BullMQ and Redis.
+- Redis connection details are provided via `REDIS_URL`
+- `.env` is used for local development convenience
+- `process.env` is the runtime source of truth
+- No credentials are committed to version control
 
-### Observed States
+### Tooling Decisions
 
-- `waiting` – Job is queued but not yet being processed
-- `active` – Job is currently being processed by a worker
-- `completed` – Job finished successfully
-- `failed` – Job execution failed
-
-### Key Decisions
-
-- Job state is sourced directly from BullMQ
-- No custom job-status database is introduced
-- No duplication of job metadata
-- Status access is read-only
-
-**Note:** Jobs may remain in `waiting` state when no workers are running. This behavior is intentional and correct.
+- **Postman** is used during development to simulate realistic client requests
+- **nodemon** and **concurrently** improve development workflow without altering architecture
+- `curl` is not a required part of the system design
 
 ---
 
-## Job Status API
+## Phase 1–2 — Job Lifecycle & Status API
 
-A single endpoint is exposed for job status queries:
-
-```
-GET /jobs/:id/status
-```
-
-### Design Principles
-
-- One endpoint for all job states
-- No state-specific endpoints
-- No polling strategy enforced by the backend
-- Clients decide how and when to query status
-
-This approach aligns with real-world async system design patterns.
-
----
-
-## Job Input Contract (Phase 1–2)
+### Job Input Contract
 
 Jobs are submitted as structured JSON objects with:
 
-- `type` – Identifies the job category
-- `payload` – Contains job-specific data and metadata
-
-### Example
+- `type` — Identifies the job category
+- `payload` — Contains job-specific data and metadata
 
 ```json
 {
@@ -90,30 +88,43 @@ Jobs are submitted as structured JSON objects with:
 }
 ```
 
+### Job Lifecycle
+
+Jobs have a well-defined lifecycle managed by BullMQ and stored in Redis.
+
+| State | Description |
+|---|---|
+| `waiting` | Job is queued but not yet being processed |
+| `active` | Job is currently being processed by a worker |
+| `completed` | Job finished successfully |
+| `failed` | Job execution failed |
+
+> **Note:** Jobs may remain in `waiting` state when no workers are running. This behavior is intentional and correct.
+
+### Key Decisions
+
+- Job state is sourced directly from BullMQ — no custom status database is introduced
+- No duplication of job metadata
+- Status access is read-only
+
+### Job Status API
+
+A single endpoint is exposed for job status queries:
+
+```
+GET /jobs/:id/status
+```
+
+**Design principles:**
+- One endpoint for all job states — no state-specific endpoints
+- No polling strategy enforced by the backend
+- Clients decide how and when to query status
+
+This approach aligns with real-world async system design patterns.
+
 ---
 
-## Configuration Strategy
-
-All environment-specific configuration is externalized.
-
-- Redis connection details are provided via `REDIS_URL`
-- `.env` is used for local development convenience
-- `process.env` is the runtime source of truth
-- No credentials are committed to version control
-
----
-
-## Tooling Decisions
-
-- **Postman** is used during development to simulate realistic client requests
-- **nodemon** and **concurrently** improve development workflow without altering architecture
-- `curl` is not a required part of the system design
-
----
-
-## Failure Handling & Reliability (Phase 3)
-
-The system is designed to tolerate and isolate job failures without compromising overall stability.
+## Phase 3 — Failure Handling & Reliability
 
 ### Failure Model
 
@@ -138,11 +149,11 @@ The system is designed to tolerate and isolate job failures without compromising
 - Failed jobs remain stored and queryable
 - No infinite retry loops are possible
 
-These behaviors are considered stable and form the reliability foundation for future phases.
+These behaviors form the reliability foundation for all future phases.
 
 ---
 
-## Idempotency & Safety (Phase 4)
+## Phase 4 — Idempotency & Safety
 
 Phase 4 focused on making the background job system safe under retries, duplicate submissions, and worker crashes.
 
@@ -151,49 +162,49 @@ Phase 4 focused on making the background job system safe under retries, duplicat
 - Introduced client-defined idempotency keys to prevent duplicate jobs
 - Enforced strict API validation to protect the idempotency contract
 - Decoupled semantic intent (`idempotencyKey`) from system identity (`jobId`)
-- Implemented a Redis-based reservation pattern to guarantee at-most-once execution of side effects
+- Implemented a Redis-based reservation pattern (`SET NX`) to guarantee at-most-once execution of side effects
 - Verified correct behavior through extensive edge-case testing
-
-### Design Principle
-
-> Idempotency expresses intent.  
-> Job IDs enforce safety.  
-> Side effects must be protected before execution.
 
 ### System Guarantees
 
-The system now behaves correctly under:
+The system behaves correctly under:
 
 - Duplicate API requests
 - Retries due to transient failures
 - Worker crashes and restarts
 
-Phase 4 marks the completion of the system's safety and correctness goals.
+### Design Principle
+
+> **Idempotency expresses intent.**  
+> **Job IDs enforce safety.**  
+> **Side effects must be protected before execution.**
+
+Phase 4 marks the completion of the system's core safety and correctness goals.
 
 ---
 
-## Background-Only & Scheduled Jobs (Phase 5)
+## Phase 5 — Background-Only & Scheduled Jobs
 
-Phase 5 focused on removing the dependency on HTTP requests for job creation and enabling system-driven background workflows.
+Phase 5 removed the dependency on HTTP requests for job creation, enabling fully system-driven background workflows.
 
-### Phase 5.1 – System Producer
+### Phase 5.1 — System Producer
 
-- Added a standalone Node.js script that enqueues jobs directly
+- Added a standalone Node.js script that enqueues jobs directly, without any HTTP call
 - Reused existing queue and idempotency logic
-- Confirmed that workers can process jobs created outside the API lifecycle
+- Confirmed that workers process jobs created outside the API lifecycle
 
-### Phase 5.2 – Scheduled Jobs
+### Phase 5.2 — Scheduled Jobs
 
-- Implemented a simple scheduler using `setInterval`
+- Implemented a lightweight scheduler using `setInterval`
 - Scheduler runs as an independent process
 - Jobs are triggered periodically without user interaction
 
-### Phase 5.3 – Safety & Correctness
+### Phase 5.3 — Safety & Correctness
 
-- Introduced time-bucketed idempotency keys for scheduled jobs
+- Introduced time-bucketed idempotency keys for scheduled jobs — the same time window always produces the same job ID
 - Prevented duplicate job creation across restarts
-- Ensured retries and side-effect safety remain intact
-- Kept scheduler stateless and lightweight
+- Kept the scheduler stateless and lightweight
+- Ensured retry and side-effect safety remain fully intact
 
 ### Key Learnings
 
@@ -206,1002 +217,486 @@ Phase 5 completes the system's transition to autonomous background processing.
 
 ---
 
-## Version Status
-
-**Current Phase:** Phase 5 Complete
-
-The system now supports:
-
-- API-triggered jobs
-- System-triggered jobs
-- Scheduled jobs
-
-All with:
-
-- Idempotent job creation
-- Retry-safe execution
-- At-most-once side effects
-- Redis as the source of truth
-
-Observability & Monitoring (Phase 6)
+## Phase 6 — Observability & Monitoring
 
 Phase 6 focused on making the system observable under real execution conditions without changing job semantics, control flow, or failure behavior.
 
-The goal was to ensure that background job execution can be understood, measured, and trusted during success, failure, retries, and recovery scenarios.
+### Logging Decisions
 
-Logging Decisions
+- Replaced ad-hoc `console.log` calls in the worker with structured, machine-readable logs
+- Enforced consistent job-level correlation using `jobId`
+- Logs represent execution events, not request–response flows
+- Log ordering is intentionally non-linear due to asynchronous execution
 
-Replaced ad-hoc console logging in the worker with structured logs
+Logged events include:
 
-Enforced consistent job-level correlation using jobId
+| Event | Meaning |
+|---|---|
+| `job.started` | Worker has picked up the job |
+| `job.side_effect_started` | Side effect execution is beginning |
+| `job.completed` | Job finished successfully |
+| `job.completed_recovered` | Job completed after one or more retries |
+| `job.failed` | Job reached terminal failure state |
 
-Logs represent execution events, not request–response flows
+This enables reliable reconstruction of a job's full lifecycle across retries, crashes, and restarts.
 
-Log ordering is intentionally non-linear due to asynchronous execution
+### Metrics Decisions
 
-This enables reliable reconstruction of a job’s lifecycle across retries, crashes, and worker restarts.
+The system now emits Prometheus-compatible metrics from the worker process. Metrics are strictly observational and never influence execution logic.
 
-Metrics Decisions
+**Execution counters:**
+- Successful executions
+- Failed execution attempts (including retries)
 
-The system now emits Prometheus-compatible metrics from the worker process.
+**Latency histograms:**
+- Recorded only for successful job executions
+- Bucketed to reveal performance distribution rather than averages
+- Failed executions are intentionally excluded to prevent skewed performance signals
 
-Metrics are strictly observational and never influence execution logic.
-
-Recorded metrics include:
-
-Job execution counters
-
-Successful executions
-
-Failed execution attempts (including retries)
-
-Execution latency histograms
-
-Recorded only for successful job executions
-
-Bucketed to reveal performance distribution rather than averages
-
-Failed executions are intentionally excluded from latency histograms to prevent skewed performance signals.
-
-Metrics Exposure Model
-
-The API process exposes /metrics for API and process-level metrics
-
-The worker process exposes /metrics on a separate port for job execution metrics
-
-Metrics are process-local and not shared across memory boundaries
+**Metrics exposure model:**
+- The API process exposes `/metrics` for API and process-level metrics
+- The worker process exposes `/metrics` on a separate port for job execution metrics
+- Metrics are process-local and not shared across memory boundaries
 
 This mirrors real-world production systems where workers scale independently and expose their own operational signals.
 
-Observability Guarantees
+### Observability Guarantees
 
 After Phase 6, the system can reliably answer:
 
-How many jobs are executed per job type?
+- How many jobs are executed per job type?
+- How many failure and retry events occur?
+- How long do successful jobs take to execute (distribution, not averages)?
+- Whether retries and recovery paths behave as expected
 
-How many failure and retry events occur?
+Phase 6 establishes observability as a first-class system capability and forms the foundation for safe scaling, explicit DLQs, and operational alerting.
 
-How long successful jobs take to execute (distribution, not averages)?
+---
 
-Whether retries and recovery paths behave as expected
+## Phase 7 — Dead Letter Queue (DLQ)
 
-Phase 6 establishes observability as a first-class system capability and forms the foundation for safe scaling, explicit DLQs, and operational alerting in later phases.
+Phase 7 introduced an explicit Dead Letter Queue to isolate terminal job failures from normal job processing, cleanly separating transient failures from permanent ones.
 
-1️⃣ Update PROJECT_CONTEXT.md (Phase 7)
+### DLQ Design Decisions
 
-📍 Where to add
-Append this as a new section after Phase 6, before any “Future” or “Next” sections.
+- A job is considered dead only after **all** retry attempts are exhausted
+- Only terminal failures are moved to the DLQ — retrying jobs are never considered dead
+- The DLQ is implemented as a separate BullMQ queue with no attached worker
+- The DLQ is write-only in this phase
 
-Dead Letter Queue (DLQ) – Phase 7
+### DLQ Semantics
 
-Phase 7 introduced an explicit Dead Letter Queue (DLQ) to isolate terminal job failures from normal job processing.
+- Jobs enter the DLQ exactly once
+- DLQ jobs are inert — they do not trigger side effects
+- Normal job execution remains unaffected
+- This prevents retry storms, cascading failures, and hidden execution paths
 
-The goal of this phase was to separate transient failures from permanent failures while preserving observability and correctness guarantees established in earlier phases.
-
-DLQ Design Decisions
-
-A job is considered dead only after all retry attempts are exhausted
-
-Only terminal failures are moved to the DLQ
-
-DLQ is implemented as a separate BullMQ queue
-
-No worker is attached to the DLQ
-
-DLQ is write-only in this phase
-
-This ensures retries behave normally and DLQ usage is explicit and intentional.
-
-DLQ Semantics
-
-Retry failures do not enter the DLQ
-
-A job enters the DLQ exactly once
-
-Normal job execution remains unaffected
-
-DLQ jobs are inert and do not trigger side effects
-
-This prevents retry storms, cascading failures, and hidden execution paths.
-
-DLQ Payload Strategy
+### DLQ Payload Strategy
 
 Each DLQ entry preserves sufficient context for inspection and future replay:
 
-Original job ID
-
-Job type
-
-Original payload
-
-Failure reason
-
-Attempts made
-
-Failure timestamp
+- Original job ID
+- Job type
+- Original payload
+- Failure reason
+- Number of attempts
+- Failure timestamp
 
 The DLQ acts as a durable audit record, not an automated recovery mechanism.
 
-DLQ Observability
+### DLQ Observability
 
-Phase 7 extends observability with a dedicated DLQ metric:
+A dedicated DLQ metric is exposed:
 
-dlq_jobs_total
+- `dlq_jobs_total` — counts permanently failed jobs, labeled by job type
 
-Counts jobs that permanently failed
+This cleanly separates execution-level failures (retry metrics) from terminal failures (DLQ metrics).
 
-Labeled by job type
+### Phase 7 Outcome
 
-This cleanly separates:
+The system now guarantees:
 
-execution failures (retry-level)
+- Clear distinction between transient and terminal failures
+- Safe isolation of permanently failed jobs
+- Durable and inspectable failure records
+- Metrics that accurately reflect true system health
 
-terminal failures (DLQ-level)
+---
 
-Phase Outcome
+## Phase 8 — DLQ Replay Semantics
 
-After Phase 7, the system guarantees:
+Phase 8 introduced explicit and safe replay semantics for jobs stored in the DLQ, enabling intentional recovery from terminal failures without compromising correctness, idempotency, or observability.
 
-Clear distinction between transient and terminal failures
+### Replay Design Principles
 
-Safe isolation of permanently failed jobs
+Replay is treated as a deliberate operational action, not an automated system behavior.
 
-Durable and inspectable failure records
+- Replay always creates a **new job** — original jobs and DLQ records are never mutated
+- Replay is manual and explicit
+- Workers remain unaware of replay mechanics
+- Replay does not bypass retry logic or execution safeguards
 
-Metrics that reflect true system health
+### Replay Semantics
 
-Phase 7 completes the failure lifecycle model, enabling future work such as replay, alerting, and operational workflows.
+- DLQ entries are replayed by DLQ Job ID, not the original job ID
+- Replay enqueues a new job into the primary queue
+- A new job ID is always generated
+- Lineage is preserved via metadata: `replayedFromJobId`, `replayedAt`, `replayCount`
+- The original DLQ entry remains as a durable audit record
 
-DLQ Replay Semantics (Phase 8)
+### Replay Safety Controls
 
-Phase 8 introduced explicit and safe replay semantics for jobs stored in the Dead Letter Queue (DLQ).
+- Replay count is tracked and limited to prevent infinite replay loops
+- Failure-inducing payload flags (e.g. `forceFail`) are stripped on replay
+- Each replay represents an explicit operational decision — no automatic replay loops exist
 
-The goal of this phase was to enable intentional recovery from terminal failures without compromising correctness, idempotency, or observability guarantees.
+### Failure and Replay Interaction
 
-Replay Design Principles
+- A replayed job may succeed or fail independently
+- If a replayed job fails permanently, it creates a **new** DLQ entry
+- Previous DLQ entries remain intact and unmodified
 
-Replay is treated as an operational action, not an automated system behavior.
+### Observability Guarantees
 
-Key principles:
+- Job execution metrics reflect replayed jobs as normal executions
+- DLQ metrics remain historical and append-only
+- Logs clearly distinguish replayed jobs via lineage metadata
 
-Replay always creates a new job
+### Phase 8 Outcome
 
-Original jobs and DLQ records are never mutated
+The system now guarantees:
 
-Replay is manual and explicit
+- Safe recovery from terminal job failures
+- Clear separation between retry and replay semantics
+- Full auditability of failures and all recovery attempts
+- No hidden or automatic execution paths
 
-Workers remain unaware of replay mechanics
+---
 
-This ensures replay does not bypass retry logic or execution safeguards.
+## Phase 9 — Horizontal Scaling & Worker Concurrency
 
-Replay Semantics
+Phase 9 introduced horizontal and vertical scaling to validate the system under concurrent load and verify that all correctness guarantees hold at scale.
 
-DLQ entries are replayed by DLQ Job ID, not original job ID
+### Horizontal Scaling (Multiple Workers)
 
-Replay enqueues a new job into the primary queue
+Multiple worker processes run simultaneously, all consuming from the same queue. BullMQ uses Redis-based locking to ensure exclusive job processing — each job attempt is processed by exactly one worker at a time.
 
-A new job ID is always generated
+**Properties validated:**
 
-Lineage is preserved via metadata:
+- Jobs are distributed across workers
+- A single job is processed by only one worker at a time
+- Retries may be handled by different workers
+- DLQ behavior remains correct under concurrent failures
+- No duplicate side effects occurred
 
-replayedFromJobId
+### Vertical Scaling (Per-Worker Concurrency)
 
-replayedAt
+Worker concurrency is configurable, allowing a single worker process to process multiple jobs in parallel:
 
-The original DLQ entry remains as a durable audit record.
+```
+Total parallel jobs = number of workers × concurrency per worker
+```
 
-Failure and Replay Interaction
+Throughput improvements are near-linear for I/O-bound workloads.
 
-A replayed job may succeed or fail independently
+### Retry Distribution Behavior
 
-If a replayed job fails permanently, it creates a new DLQ entry
+Under concurrent load, a job's retry attempts may be executed by different workers — worker affinity is not enforced. This behavior is expected and desirable in distributed queue systems.
 
-No automatic replay loops exist
+### Observability Under Scale
 
-Each replay represents an explicit human decision
+Each worker exposes its own `/metrics` endpoint on a separate port. Metrics are process-local and aggregation-ready for external monitoring tools such as Prometheus.
 
-This prevents infinite failure cycles and hidden recovery behavior.
+### Phase 9 Outcome
 
-Observability Guarantees
+The system now supports:
 
-Replay semantics preserve all observability guarantees:
+- Multi-process distributed execution
+- Per-worker concurrency scaling
+- Safe retry handling across workers
+- Correct DLQ behavior under concurrent load
+- Observable metrics per worker instance
+- Verified throughput improvements
 
-Job execution metrics reflect replayed jobs as normal executions
+Phase 9 transitions the system from a single-node job processor to a scalable distributed worker cluster.
 
-DLQ metrics remain historical and append-only
+---
 
-Logs clearly distinguish replayed jobs via lineage metadata
+## Phase 10 — Multi-Queue Workload Isolation
 
-Replay does not alter existing metrics semantics.
+Phase 10 introduced queue isolation to separate heterogeneous workloads into independent processing lanes, preventing noisy-neighbor effects.
 
-Phase Outcome
+### Motivation
 
-After Phase 8, the system guarantees:
+In earlier phases, all job types shared a single queue. This created operational limitations:
 
-Safe recovery from terminal job failures
+- Heavy jobs could delay lightweight jobs
+- Concurrency tuning applied globally
+- Backpressure from one workload affected all others
 
-Clear separation between retry and replay semantics
+### Multi-Queue Architecture
 
-Full auditability of failures and recovery attempts
+The system now maintains multiple BullMQ queues, each backed by Redis with independent FIFO ordering and a dedicated Worker instance:
 
-No hidden or automatic execution paths
+| Queue | Job Type | Weight |
+|---|---|---|
+| `email-queue` | `welcome-email` | Medium |
+| `report-queue` | `generate-report` | Heavy |
+| `cleanup-queue` | `cleanup-temp` | Light |
 
-Phase 8 completes the failure recovery lifecycle, enabling confident operation and future scaling.
+Job types are mapped to queues centrally via a **queue registry**. Unsupported job types are rejected at API validation time.
 
-Horizontal Scaling & Worker Concurrency (Phase 9)
+### Isolation Guarantees
 
-Phase 9 introduced horizontal and vertical scaling capabilities to validate the system under concurrent load.
-
-This phase tested the architectural assumptions made in earlier phases, particularly idempotency, retry safety, DLQ behavior, and observability under multi-worker execution.
-
-Horizontal Scaling (Multiple Workers)
-
-Multiple worker processes were started simultaneously, all consuming from the same jobs-queue.
-
-Key properties validated:
-
-Jobs are distributed across workers
-
-A single job is processed by only one worker at a time
-
-Retries may be handled by different workers
-
-DLQ behavior remains correct under concurrent failures
-
-No duplicate side effects occurred
-
-BullMQ uses Redis-based locking to ensure exclusive job processing across workers.
-
-Vertical Scaling (Per-Worker Concurrency)
-
-Worker concurrency was increased using:
-
-{
-  connection,
-  concurrency: 3
-}
-
-
-This allows a single worker to process multiple jobs concurrently.
-
-Observations:
-
-Multiple jobs start execution immediately within the same worker
-
-Throughput increases proportionally for I/O-bound jobs
-
-Idempotency safeguards continue to prevent duplicate side effects
-
-Metrics remain accurate per worker instance
-
-Observability Under Scale
-
-Each worker exposes its own /metrics endpoint on a separate port.
-
-Metrics are:
-
-Process-local
-
-Independent per worker
-
-Aggregation-ready (via external monitoring tools)
-
-This mirrors real distributed monitoring setups.
-
-Retry Distribution Behavior
-
-Under concurrent load:
-
-A job's retry attempts may be executed by different workers
-
-Worker affinity is not enforced
-
-Locking ensures only one worker processes a job attempt at a time
-
-This behavior is expected and desirable in distributed queue systems.
-
-Throughput Validation
-
-Controlled experiments were performed:
-
-Baseline with concurrency = 1
-
-Increased concurrency = 3
-
-Measured execution time reduction
-
-Observed near-linear improvement for I/O-bound workloads
-
-This confirms the system scales both horizontally and vertically.
-
-Phase 9 Outcome
-
-After Phase 9, the system now supports:
-
-Multi-process distributed execution
-
-Per-worker concurrency scaling
-
-Safe retry handling across workers
-
-Correct DLQ behavior under concurrent load
-
-Observable metrics per worker instance
-
-Verified throughput improvements
-
-Phase 9 transitions the system from a single-node job processor to a scalable distributed worker cluster
-
-Queue Isolation & Workload Segmentation (Phase 10)
-
-Phase 10 introduced queue isolation to separate heterogeneous workloads into independent processing lanes.
-
-The goal of this phase was to prevent noisy-neighbor effects and enable workload-specific scaling strategies.
-
-Motivation
-
-In earlier phases, all job types shared a single queue.
-
-This design works functionally but has operational limitations:
-
-Heavy jobs can delay lightweight jobs
-
-Concurrency tuning applies globally
-
-Throughput fairness cannot be enforced
-
-Backpressure from one workload affects all workloads
-
-Phase 10 resolves this by isolating job types into dedicated queues.
-
-Multi-Queue Architecture
-
-The system now maintains multiple BullMQ queues:
-
-email-queue
-
-report-queue
-
-cleanup-queue
-
-Each queue:
-
-Is backed by Redis
-
-Has independent FIFO ordering
-
-Is processed by a dedicated Worker instance
-
-Maintains separate waiting, active, completed, and failed states
-
-This ensures workload isolation at the queue level.
-
-Type-to-Queue Mapping
-
-Job types are explicitly mapped to queues:
-
-welcome-email → email-queue
-
-generate-report → report-queue
-
-cleanup-temp → cleanup-queue
-
-This mapping is enforced centrally via a queue registry.
-
-Unsupported job types are rejected at API validation time.
-
-Per-Queue Concurrency Model
-
-Each queue has independent concurrency settings:
-
-Email jobs: medium weight
-
-Report jobs: heavy weight
-
-Cleanup jobs: lightweight
-
-Concurrency is configured per queue rather than globally.
-
-This allows:
-
-Fine-grained resource allocation
-
-Workload-aware scaling
-
-Predictable throughput tuning
-
-Isolation Guarantees
-
-Queue isolation ensures:
-
-Heavy report jobs cannot delay email jobs
-
-Cleanup tasks do not block other workloads
-
-Retry storms remain confined to a single queue
-
-DLQ behavior remains queue-aware
-
-Metrics remain labeled per job type
+- Heavy report jobs cannot delay email jobs
+- Cleanup tasks do not block other workloads
+- Retry storms remain confined to a single queue
+- DLQ behavior is correct and scoped per job type
+- Metrics remain labeled per job type
 
 Isolation occurs at the Redis queue level, not at the worker process level.
 
-Scaling Model After Phase 10
+### Scaling Model
 
-Total parallel execution capacity now equals:
+```
+Total parallel jobs = sum of (per-queue concurrency × number of worker processes)
+```
 
-Sum of (per-queue concurrency × number of worker processes)
+Example: 2 workers × (3 + 2 + 1 concurrency) = **12 parallel jobs**
 
-Example:
+### Phase 10 Outcome
 
-1 worker process:
+The system transitions from a monolithic queue processor to a **workload-aware distributed job platform**.
 
-email (3)
+---
 
-report (2)
-
-cleanup (1)
-
-Total parallel jobs = 6
-
-2 worker processes:
-Total parallel jobs = 12
-
-Scaling is both horizontal (more workers) and segmented (per-queue tuning).
-
-Observability Under Isolation
-
-Metrics remain labeled by job type.
-
-Queue isolation does not alter:
-
-Retry semantics
-
-DLQ behavior
-
-Idempotency guarantees
-
-Side-effect protection
-
-Isolation improves workload fairness without changing correctness guarantees.
-
-Phase 10 Outcome
-
-After Phase 10, the system now guarantees:
-
-Workload segmentation
-
-Independent queue backpressure
-
-Fair job scheduling across job types
-
-Predictable scaling behavior
-
-Safe extension for future job categories
-
-Phase 10 transitions the system from a monolithic queue processor to a workload-aware distributed job platform.
-
-Graceful Shutdown & Worker Lifecycle Management (Phase 11)
+## Phase 11 — Graceful Shutdown & Lifecycle Safety
 
 Phase 11 introduced graceful shutdown handling to ensure safe worker termination during process interrupts, container restarts, and deployment rollouts.
 
-The goal was to guarantee that active jobs complete safely before the worker exits.
+### Problem Addressed
 
-Problem Addressed
+Without graceful shutdown, active jobs could be interrupted mid-execution, side effects could remain partially applied, Redis connections could close abruptly, and metrics servers could leak open ports.
 
-Without graceful shutdown:
+### Shutdown Strategy
 
-Active jobs could be interrupted mid-execution
+The worker listens for `SIGTERM` (container orchestration) and `SIGINT` (manual interrupt). On receiving either signal:
 
-Side effects could remain partially applied
+1. Stop fetching new jobs
+2. Allow all active jobs to complete
+3. Close all BullMQ worker instances
+4. Close the metrics HTTP server
+5. Close the Redis connection
+6. Exit cleanly
 
-Redis connections could close abruptly
+### Key Properties
 
-Metrics servers could leak open ports
+- `worker.close()` ensures no new jobs are pulled, in-progress jobs are allowed to finish, and locks are released safely
+- No job is ever abandoned mid-execution
+- Because side effects are protected via `SET NX`, interrupted executions do not duplicate side effects — shutdown does not compromise idempotency guarantees
 
-Containers could terminate unsafely
+### Shutdown Observability
 
-This behavior is unacceptable in distributed production systems.
+Structured shutdown events are emitted:
 
-Shutdown Strategy
+- `worker.shutdown_initiated`
+- `worker.shutdown_complete`
+- `worker.shutdown_error` (if any)
 
-The worker now listens for:
+### Phase 11 Outcome
 
-SIGTERM (container orchestration signals)
+The system guarantees:
 
-SIGINT (manual interrupts)
+- No partial job execution during shutdown
+- No side-effect duplication during interrupts
+- Clean Redis and metrics server disconnection
+- Deterministic process termination
 
-On receiving a shutdown signal:
+Phase 11 transitions the worker from development-safe to **production-safe lifecycle management**.
 
-Stop fetching new jobs
+---
 
-Allow active jobs to complete
+## Phase 12 — Queue Depth Metrics & Backpressure Awareness
 
-Close all BullMQ worker instances
+Phase 12 introduced queue depth monitoring to provide real-time visibility into workload pressure and backlog growth.
 
-Close the metrics HTTP server
+### Problem Addressed
 
-Close the Redis connection
+Before Phase 12, the system tracked job counts, failures, latency, and DLQ events — but had no visibility into queue buildup. This made it impossible to detect backlog growth, identify under-provisioned queues, or make data-driven scaling decisions.
 
-Exit cleanly
+### Metrics Introduced
 
-This guarantees controlled process termination.
+For each queue, three metrics are exposed (all labeled by queue name):
 
-Worker Close Semantics
+| Metric | Description |
+|---|---|
+| `queue_waiting_jobs` | Jobs queued but not yet processing |
+| `queue_active_jobs` | Jobs currently in-flight |
+| `queue_delayed_jobs` | Jobs pending retry (in backoff delay) |
 
-worker.close() ensures:
+**Example output:**
 
-No new jobs are pulled from Redis
-
-In-progress jobs are allowed to finish
-
-Locks are released safely
-
-Retry behavior remains intact
-
-No job is abandoned mid-execution.
-
-Side-Effect Safety Under Shutdown
-
-Because side effects are protected via Redis reservation (SET NX):
-
-Interrupted executions do not duplicate side effects
-
-Retries remain safe
-
-Shutdown does not compromise idempotency guarantees
-
-Phase 11 reinforces correctness guarantees established in Phase 4.
-
-Observability During Shutdown
-
-Shutdown emits structured logs:
-
-worker.shutdown_initiated
-
-worker.shutdown_complete
-
-worker.shutdown_error (if any)
-
-This provides operational visibility during deployment events.
-
-Deployment Safety
-
-After Phase 11, the system supports:
-
-Docker container restarts
-
-Kubernetes rolling deployments
-
-Zero-downtime worker replacement
-
-Safe scale-down operations
-
-Worker processes are now production-safe under lifecycle events.
-
-Phase 11 Outcome
-
-After Phase 11, the system guarantees:
-
-No partial job execution during shutdown
-
-No side-effect duplication during interrupts
-
-Clean Redis disconnection
-
-Clean metrics server shutdown
-
-Deterministic process termination
-
-Phase 11 transitions the worker from development-safe to production-safe lifecycle management.
-
-Queue Depth Metrics & Backpressure Awareness (Phase 12)
-
-Phase 12 introduces queue depth metrics to provide operational visibility into workload pressure and backlog growth.
-
-Until this phase, the system tracked:
-
-Total jobs processed
-
-Failures
-
-Execution latency
-
-DLQ events
-
-However, it lacked visibility into queue buildup and active workload pressure.
-
-Problem Addressed
-
-Without queue depth metrics:
-
-It is impossible to detect backlog growth.
-
-Under-provisioned queues cannot be identified.
-
-Heavy workloads cannot be distinguished from normal traffic.
-
-Scaling decisions are reactive rather than data-driven.
-
-Phase 12 resolves this by exposing real-time queue depth metrics.
-
-Metrics Introduced
-
-For each queue:
-
-queue_waiting_jobs
-
-queue_active_jobs
-
-queue_delayed_jobs
-
-All metrics are labeled by queue name.
-
-Example:
-
+```
 queue_waiting_jobs{queue="report-queue"} 8
 queue_active_jobs{queue="report-queue"} 2
 queue_delayed_jobs{queue="report-queue"} 0
-
-Collection Strategy
-
-Queue counts are polled at a fixed interval (5 seconds) using non-blocking asynchronous calls.
-
-Key properties:
-
-Metrics collection does not block job processing.
-
-Metrics polling is cleared during graceful shutdown.
-
-Redis load impact is minimal and controlled.
-
-Worker processing remains unaffected.
-
-Operational Impact
-
-Queue depth metrics enable:
-
-Detection of workload backpressure
-
-Identification of under-provisioned queues
-
-Fair workload isolation validation
-
-Scaling decisions based on real backlog data
-
-Alert threshold configuration
-
-For example:
-
-If:
-
-queue_waiting_jobs{queue="report-queue"} 75
-
-
-And:
-
 queue_waiting_jobs{queue="email-queue"} 0
+```
 
+This immediately reveals report queue pressure while email queue remains clear — validating the isolation introduced in Phase 10.
 
-This indicates report queue pressure without affecting email workload — validating isolation behavior introduced in Phase 10.
+### Collection Strategy
 
-Scaling Model Enhancement
+- Queue counts are polled at a fixed 5-second interval using non-blocking async calls
+- Metrics polling is cleared during graceful shutdown
+- Redis load impact is minimal and controlled
+- Worker processing is never affected by metrics collection
 
-With Phase 12, scaling is now informed by:
+### Phase 12 Outcome
 
-Per-queue backlog
+The system transitions from reactive scaling to **observable, data-driven scaling** — with informed decisions based on per-queue backlog, active concurrency, latency trends, and failure rates.
 
-Active concurrency limits
+---
 
-Latency trends
+## Phase 13 — Per-Queue Rate Limiting & Throughput Control
 
-Failure rates
+Phase 13 introduced rate limiting at the worker level to control job execution velocity and protect downstream dependencies from overload.
 
-The system transitions from reactive scaling to observable, data-driven scaling.
+### Problem Addressed
 
-Phase 12 Outcome
+Concurrency limits control how many jobs run simultaneously, but they do not restrict how frequently new jobs begin execution. Without rate limiting, horizontally scaled workers can overwhelm external services such as email providers, databases, and third-party APIs.
 
-After Phase 12, the system now provides:
+### Concurrency vs Rate Limiting
 
-Full workload visibility
-
-Backpressure awareness
-
-Queue-level operational intelligence
-
-Observability aligned with distributed system best practices
-
-The system now supports informed scaling rather than blind scaling.
-
-Per-Queue Rate Limiting & Throughput Control (Phase 13)
-
-Phase 13 introduces rate limiting at the worker level to control job execution velocity and protect downstream dependencies from overload.
-
-Prior phases introduced concurrency limits, but concurrency alone does not control how frequently new jobs begin execution. Without rate limiting, horizontally scaled workers could overwhelm external services such as email providers, databases, or third-party APIs.
-
-Phase 13 resolves this by enforcing per-queue execution rate limits.
-
-Problem Addressed
-
-Concurrency limits control parallel execution, but do not restrict execution frequency.
-
-Without rate limiting:
-
-Workers can start jobs faster than downstream systems can handle.
-
-Horizontal scaling multiplies execution velocity uncontrollably.
-
-External services may throttle, fail, or degrade.
-
-Retry storms can amplify system load.
-
-Rate limiting ensures execution velocity remains within safe operational bounds.
-
-Rate Limiting Model
-
-Rate limiting is configured per queue using BullMQ’s native limiter mechanism.
-
-Each queue defines:
-
-Maximum number of jobs allowed per duration window
-
-Independent execution velocity constraints
-
-Example configuration:
-
-email-queue → 5 jobs per second
-
-report-queue → 2 jobs per second
-
-cleanup-queue → 1 job per second
-
-This ensures workload-specific throughput control.
-
-Concurrency vs Rate Limiting
-
-Concurrency and rate limiting control different dimensions:
-
-Concurrency limits:
-
-Maximum number of simultaneous jobs
-
-Rate limits:
-
-Maximum number of jobs started per time interval
+| Dimension | Mechanism |
+|---|---|
+| Maximum simultaneous jobs | Concurrency limit |
+| Maximum jobs started per time window | Rate limit |
 
 Both mechanisms work together to shape workload execution safely.
 
-Isolation Guarantees Under Rate Limiting
+### Rate Limiting Model
 
-Because queues are isolated (Phase 10):
+Rate limiting is configured per queue using BullMQ's native limiter:
 
-Rate limits apply independently per queue
+| Queue | Rate Limit |
+|---|---|
+| `email-queue` | 5 jobs/sec |
+| `report-queue` | 2 jobs/sec |
+| `cleanup-queue` | 1 job/sec |
 
-Heavy workloads cannot throttle unrelated queues
+Because queues are isolated (Phase 10), rate limits apply independently — heavy workloads cannot throttle unrelated queues.
 
-Email jobs remain unaffected by report job throttling
+### Phase 13 Outcome
 
-Cleanup operations remain isolated from other workloads
+The system now supports safe, scalable, and **controlled distributed job execution** aligned with production-grade system design principles.
 
-This preserves workload independence while enforcing throughput control.
+---
 
-Operational Impact
+## Phase 14 — Operational Dashboard (BullBoard)
 
-Rate limiting enables:
+Phase 14 introduced a centralized operational dashboard to provide real-time inspection and management of all job queues. As the system grew in complexity, reliance on logs and Redis CLI became insufficient.
 
-Protection of downstream systems
+### Architectural Integration
 
-Controlled execution velocity
+BullBoard is mounted directly into the existing Express API server:
 
-Safe horizontal scaling
+- Mounted at `/admin/queues`
+- Uses `ExpressAdapter` and `BullMQAdapter`
+- Dynamically maps queues from the central `queueRegistry`, including the DLQ
+- Minimal overhead when new queues are added
 
-Retry storm containment
+Because BullBoard connects directly to Redis, it reflects the global state of all workers regardless of deployment topology.
 
-Predictable workload execution behavior
+### Operational Capabilities
 
-This transitions the system from unconstrained execution to controlled throughput execution.
+**Real-time inspection:**
+- View job payloads and state transitions
+- Inspect failure reasons and stack traces
+- Monitor retry attempts
 
-Phase 13 Outcome
+**Manual intervention:**
+- Retry failed jobs
+- Remove poison-pill jobs
+- Clean queue states
+- Inspect DLQ entries
 
-After Phase 13, the system now provides:
+---
 
-Workload isolation
+## Phase 14.1 — Secured Dashboard
 
-Concurrency control
+Phase 14.1 secures the BullBoard dashboard with Basic Authentication middleware, preventing unauthorized access to management operations.
 
-Backpressure visibility
+### Security Controls
 
-Graceful lifecycle management
+- Route protection via `basicAuth` middleware
+- Credentials defined via environment variables (`ADMIN_USER`, `ADMIN_PASSWORD`)
+- No hardcoded secrets
+- Unauthorized access returns `HTTP 401`
 
-Throughput control via rate limiting
+### Why Security Matters
 
-The system now supports safe, scalable, and controlled distributed job execution aligned with production-grade system design principles.
+Without authentication, BullBoard's ability to retry, delete, and clean jobs represents a critical operational vulnerability.
 
-Integrated Operational Observability (Phase 14 – BullBoard)
+### Phase 14 Outcome
 
-Phase 14 introduces a centralized operational dashboard to provide real-time inspection and management of all job queues.
+The system now includes both **programmatic and authenticated human-operable observability layers**. This transitions the system from a backend job processor to an operationally manageable distributed platform.
 
-As the system scaled in complexity, reliance on logs and Redis CLI became insufficient for efficient debugging and operational control.
+---
 
-BullBoard was integrated into the existing Express API server to provide a unified entry point for both API traffic and human operational interaction.
+## Phase 15 — Payload Validation & Boundary Hardening
 
-Architectural Integration
+Phase 15 formalized the API boundary by introducing **Zod schema-based payload validation**, replacing manual conditional checks with structured domain enforcement.
 
-Mounted at /admin/queues
+### Architectural Motivation
 
-Uses ExpressAdapter
-
-Uses BullMQAdapter
-
-Dynamically maps queues from queueRegistry
-
-Includes dead-letter-queue
-
-This ensures minimal overhead when new queues are added.
-
-Operational Capabilities
-
-Real-Time Inspection:
-
-View job payloads
-
-Track state transitions
-
-Inspect failure stack traces
-
-Monitor retry attempts
-
-Manual Intervention:
-
-Retry failed jobs
-
-Remove poison-pill jobs
-
-Clean queue states
-
-Inspect DLQ entries
-
-Cluster-Wide Visibility:
-
-Because the dashboard connects directly to Redis, it reflects the global state of all workers regardless of deployment topology.
-
-Secured Operational Surface (Phase 14.1)
-
-Phase 14.1 secures the BullBoard dashboard using Basic Authentication middleware.
-
-Security Controls
-
-Route protection via basicAuth middleware
-
-Credentials defined via environment variables
-
-No hardcoded secrets
-
-Unauthorized access returns HTTP 401
-
-Operational Impact
-
-Phase 14 and 14.1 together provide:
-
-Reduced debugging time
-
-Interactive operational recovery
-
-Controlled administrative access
-
-Secure management interface
-
-The system now includes both programmatic and authenticated human-operable observability layers.
-
-Payload Validation & System Boundary Hardening (Phase 15)
-
-Phase 15 formalizes the API boundary by introducing structured payload validation using Zod.
-
-Prior to this phase, validation logic relied on manual conditional checks. While functional, this approach was brittle and less expressive.
-
-Phase 15 replaces manual validation with schema-driven enforcement.
-
-Architectural Motivation
-
-Distributed systems must protect internal components from untrusted input.
-
-Without strict boundary validation:
-
-Invalid jobs enter Redis
-
-Workers process malformed data
-
-DLQ contains user errors
-
-Observability signals become polluted
+Distributed systems must protect internal components from untrusted input. Without strict boundary validation, invalid jobs enter Redis, workers process malformed data, the DLQ fills with user errors, and observability signals become polluted.
 
 Phase 15 establishes a clear trust boundary at the API layer.
 
-Design Principles
+### Design Principles
 
-Validation occurs before enqueue
+- Validation occurs **before** enqueue — only valid domain objects enter Redis
+- Each job type has a dedicated Zod schema
+- Validation is centralized in `jobSchemas.js` and extensible
+- Invalid requests are rejected with `400 Bad Request`
+- Worker logic assumes validated payloads
 
-Each job type has a dedicated schema
-
-Validation is centralized and extensible
-
-Invalid requests are rejected with 400
-
-Worker logic assumes validated payloads
-
-Domain Enforcement
+### Domain Enforcement
 
 Schemas enforce:
 
-Required fields per job type
-
-Proper data types
-
-Email format validation
-
-Optional test flags (forceFail)
+- Required fields per job type
+- Correct data types
+- Email format validation
+- Optional test flags (e.g. `forceFail`)
 
 This formalizes domain contracts between producers and consumers.
 
-System Impact
+### System Impact
 
-Phase 15:
+| Before Phase 15 | After Phase 15 |
+|---|---|
+| Invalid jobs enter Redis | Only validated objects enter Redis |
+| Workers process malformed data | Workers process trusted payloads |
+| DLQ contains user errors | DLQ reflects true runtime failures |
+| Metrics are polluted | Metrics represent actual behavior |
 
-Protects Redis from malformed data
+Phase 15 marks the transition from basic validation to **structured boundary protection**.
 
-Prevents unnecessary DLQ entries
+---
 
-Preserves metric accuracy
+## Phase 16 — Dockerised Deployment
 
-Reduces wasted compute
+Phase 16 introduced containerisation using Docker, transforming the system from a local development setup into a **reproducible, environment-independent deployment**.
 
-Strengthens overall system integrity
+### Architectural Motivation
 
-With Phase 15 complete, the system now has a hardened input boundary aligned with production-grade backend practices.
+Prior to this phase, the system relied on local Node.js execution, external Redis setup, and environment-specific configuration — making consistent deployment across environments difficult.
 
-🧱 Phase 16 — Dockerised Deployment
-Dockerised Deployment & Environment Standardisation (Phase 16)
+### System Topology
 
-Phase 16 introduces containerisation using Docker, transforming the system from a local development setup into a reproducible, environment-independent deployment.
-
-Architectural Motivation
-
-Prior to this phase, the system relied on:
-
-Local Node.js execution (npm run dev)
-
-External Redis setup
-
-Environment-specific configuration
-
-This approach lacked consistency across environments and made it difficult to simulate real distributed deployments.
-
-Phase 16 standardises the runtime environment using containers.
-
-System Topology
-
-The system is now composed of multiple containers orchestrated via Docker Compose:
-
+```
 API Container
      │
      ▼
@@ -1209,91 +704,43 @@ Redis Container
      │
      ▼
 Worker Container(s)
+```
 
-Each component runs in isolation while communicating over a shared Docker network.
+Each component runs in isolation and communicates over a shared Docker network. Redis is reachable at `redis://redis:6379` within the network.
 
-Key Changes
+### Key Changes
 
-Introduced Dockerfile for Node.js application
+- `Dockerfile` for the Node.js application
+- `docker-compose.yml` for multi-service orchestration
+- `.dockerignore` to optimise build context
+- `REDIS_URL` externalised for environment-specific configuration
+- Service discovery via Docker network hostnames
 
-Introduced docker-compose.yml for multi-service orchestration
+### Horizontal Scaling
 
-Added .dockerignore to optimise build context
-
-Externalised Redis connection via REDIS_URL
-
-Enabled service discovery using Docker network (redis hostname)
-
-Environment Behaviour
-
-API and Worker containers connect to Redis using:
-
-redis://redis:6379
-
-Docker Compose manages service lifecycle and networking
-
-System can be started with:
-
-docker compose up
-Horizontal Scaling
-
-Workers can now be scaled independently:
-
+```bash
 docker compose up --scale worker=3
+```
 
-This enables:
+This enables parallel job processing, load distribution across workers, and realistic local simulation of distributed system behavior.
 
-parallel job processing
+### Phase 16 Outcome
 
-workload distribution
+Phase 16 marks the transition from a development system to a **deployable architecture** — with environment consistency, simplified onboarding, and a foundation for CI/CD pipelines.
 
-realistic simulation of distributed systems
+---
 
-System Impact
+## Phase 17 — Continuous Integration
 
-Phase 16 enables:
+Phase 17 introduced a CI pipeline using GitHub Actions to automatically validate the system on every push and pull request.
 
-environment consistency across machines
+### Architectural Motivation
 
-production-like execution locally and in CI
+Prior to this phase, system validation was entirely manual (Postman, logs). This made the system prone to unnoticed regressions, broken deployments, and environment inconsistencies.
 
-horizontal scaling of workers
+### CI Workflow
 
-simplified onboarding and setup
-
-foundation for automated testing and deployment pipelines
-
-This phase marks the transition from a development system to a deployable architecture.
-
-⚙️ Phase 17 — Continuous Integration (CI)
-Continuous Integration & Automated System Validation (Phase 17)
-
-Phase 17 introduces a CI pipeline using GitHub Actions to automatically validate the system on every code change.
-
-Architectural Motivation
-
-Prior to this phase, system validation was manual:
-
-Developers ran the system locally
-
-Tested via Postman or logs
-
-No automated safeguards existed
-
-This made the system prone to:
-
-unnoticed regressions
-
-broken deployments
-
-environment inconsistencies
-
-Phase 17 automates validation.
-
-CI Workflow Overview
-
-On every push or pull request:
-
+```
 GitHub Actions Runner
         ↓
 Checkout Repository
@@ -1305,72 +752,34 @@ Start Services (API + Worker + Redis)
 Run Integration Tests
         ↓
 Pass / Fail
-Key Components
+```
 
-.github/workflows/ci.yml — CI configuration
+### Validation Strategy
 
-Docker-based test execution environment
+The CI pipeline follows a **black-box integration testing model** — tests interact only via API endpoints and do not depend on internal implementation details. This ensures stability during internal refactoring.
 
-Health check endpoint (GET /)
+| Check | Description |
+|---|---|
+| System startup | Docker containers build and services start without errors |
+| API availability | Health endpoint responds successfully |
+| Job submission | Valid jobs are accepted (`202 Accepted`) |
+| Worker stability | Jobs are processed without runtime failures |
+| Job lifecycle | Jobs transition `waiting → active → completed` |
+| Idempotency | Duplicate requests return the same job ID |
+| Retry handling | Failed jobs are retried and reach terminal `failed` state |
+| DLQ isolation | Permanently failed jobs are isolated in the DLQ |
+| DLQ retrieval | DLQ jobs are accessible via `GET /jobs/dlq` |
+| DLQ replay | Jobs can be replayed with lineage metadata preserved |
 
-Integration test suite using Jest + Supertest
+### Phase 17 Outcome
 
-Validation Strategy
+The system now has:
 
-The CI pipeline verifies:
+- Automated regression detection on every push
+- Reproducible testing environments via Docker
+- Confidence in code changes before deployment
+- A foundation for advanced testing (load testing, retry verification, performance benchmarks)
 
-1. System Startup
+---
 
-Docker containers build successfully
-
-API and worker services start without errors
-
-2. API Availability
-
-Health endpoint responds successfully
-
-3. Job Submission
-
-Valid job requests are accepted (202 Accepted)
-
-4. Worker Stability
-
-Jobs are processed without runtime failures
-
-Testing Approach
-
-Initial tests follow a black-box integration testing model:
-
-Interact only via API endpoints
-
-Do not depend on internal implementation details
-
-Validate system behaviour from an external perspective
-
-This ensures stability even during internal refactoring.
-
-System Impact
-
-Phase 17 introduces:
-
-automated regression detection
-
-reproducible testing environments via Docker
-
-confidence in code changes before deployment
-
-reduced manual testing effort
-
-foundation for advanced testing (DLQ, retries, idempotency)
-
-Future Extensions
-
-DLQ behaviour validation tests
-
-Idempotency enforcement tests
-
-Retry/backoff verification
-
-Performance/load testing
-
-Docker image publishing
+*This document reflects the complete architectural evolution of the system through Phase 17. Each phase builds on prior correctness and observability guarantees without compromising them.*

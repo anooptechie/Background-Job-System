@@ -7,7 +7,7 @@ const deadLetterQueue = require("../queue/deadLetterQueue");
 ====================================== */
 
 async function createJob(req, res) {
-  const { type, payload, idempotencyKey } = req.body;
+  const { type, payload, idempotencyKey, priority } = req.body;
 
   // Basic field presence check
   if (!type || !payload || !idempotencyKey) {
@@ -53,11 +53,20 @@ async function createJob(req, res) {
   }
 
   try {
-    const job = await addJob(type, validation.data, idempotencyKey);
+    // ✅ Priority handling (new)
+    const safePriority = Math.min(Math.max(priority || 5, 1), 10);
+
+    const job = await addJob(
+      type,
+      validation.data,
+      idempotencyKey,
+      { priority: safePriority }, // 👈 passed to queue
+    );
 
     return res.status(202).json({
       status: "accepted",
       jobId: job.id,
+      priority: safePriority, // optional but useful
     });
   } catch (err) {
     console.error("Enqueue Error:", err.message);
@@ -67,7 +76,6 @@ async function createJob(req, res) {
     });
   }
 }
-
 /* ======================================
    Get Job Status
 ====================================== */

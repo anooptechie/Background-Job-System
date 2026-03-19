@@ -65,7 +65,15 @@ metricsServer.listen(METRICS_PORT, () => {
 async function processJob(job) {
   const startTime = Date.now();
 
-  logger.info({ jobId: job.id, jobType: job.name }, "job.started");
+  logger.info(
+    {
+      jobId: job.id,
+      jobType: job.name,
+      priority: job.opts?.priority,
+      tag: job.opts?.priority === 1 ? "🔥 HIGH" : "LOW",
+    },
+    "job.started",
+  );
 
   if (job.data?.forceFail === true) {
     logger.warn({ jobId: job.id }, "job.forced_failure");
@@ -110,34 +118,38 @@ async function processJob(job) {
 /* =============================
    Phase 13 — Concurrency + Rate Limiting
 ============================= */
+const isTest = process.env.NODE_ENV === "test";
+
+const defaultConfig = {
+  concurrency: 1,
+};
 
 const queueConfig = {
   "email-queue": {
     concurrency: 3,
-    limiter: { max: 5, duration: 1000 },
+    limiter: { max: 5, duration: isTest ? 100 : 1000 },
   },
   "report-queue": {
     concurrency: 2,
-    limiter: { max: 2, duration: 1000 },
+    limiter: { max: 2, duration: isTest ? 100 : 1000 },
   },
   "cleanup-queue": {
     concurrency: 1,
-    limiter: { max: 1, duration: 1000 },
+    limiter: { max: 1, duration: isTest ? 100 : 1000 },
   },
 };
 
 const workers = [];
 
 Object.values(queues).forEach((queue) => {
-  const config = queueConfig[queue.name] || {
-    concurrency: 1,
-    limiter: { max: 1, duration: 1000 },
-  };
+  const config = queueConfig[queue.name] ?? defaultConfig;
 
   const worker = new Worker(queue.name, processJob, {
     connection,
     concurrency: config.concurrency,
-    limiter: config.limiter,
+
+    // ✅ Apply limiter only if defined
+    ...(config.limiter && { limiter: config.limiter }),
   });
 
   workers.push(worker);
@@ -201,7 +213,6 @@ const metricsInterval = setInterval(async () => {
     //This will now work because dlqSizeGauge is imported
     const dlqCount = await deadLetterQueue.getWaitingCount();
     dlqSizeGauge.set(dlqCount);
-    
   } catch (err) {
     logger.error({ err: err.message }, "queue.metrics_collection_failed");
   }

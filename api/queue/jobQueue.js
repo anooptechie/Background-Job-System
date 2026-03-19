@@ -9,19 +9,20 @@ function toJobId(idempotencyKey) {
     .digest("hex");
 }
 
-async function addJob(type, payload, idempotencyKey) {
+async function addJob(type, payload, idempotencyKey, options = {}) {
   if (!idempotencyKey) {
     throw new Error("idempotencyKey is required");
   }
 
   const queue = getQueueByType(type);
   const jobId = toJobId(idempotencyKey);
-  // const jobId = crypto.randomUUID(); // ❌ breaks idempotency
 
   const job = await queue.add(type, payload, {
     jobId,
     attempts: 3,
     backoff: { type: "fixed", delay: 10000 },
+
+    ...options, // 👈 THIS enables priority (and future features)
   });
 
   return job;

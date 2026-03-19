@@ -1,65 +1,138 @@
 # Background Job & Task Processing System
 
-A production-grade background job processing system demonstrating asynchronous task execution, durable queuing, and autonomous background workflows.
-
-This project showcases how to build reliable background processing systems that operate independently of HTTP request–response cycles, with support for API-triggered, system-initiated, and scheduled jobs.
+> A production-grade background job processing system demonstrating asynchronous task execution, durable queuing, and autonomous background workflows — built to operate entirely independently of the HTTP request–response cycle.
 
 ---
 
-## 🎯 Core Capabilities
+## Table of Contents
 
-- **Asynchronous job execution** – Jobs run independently of API requests
-- **Durable job queuing** – Redis-backed persistence ensures no job loss
-- **Independent processes** – API and worker processes are fully decoupled
-- **Observable lifecycle** – Real-time job status tracking via API
-- **Idempotent operations** – Safe under retries, crashes, and duplicate requests
-- **Retry mechanism** – Automatic retry with backoff for failed jobs
-- **Scheduled jobs** – Time-based job triggering without external cron
-- **Clean architecture** – Clear separation of producers and consumers
+- [Overview](#overview)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Job Lifecycle](#job-lifecycle)
+- [API Reference](#api-reference)
+- [Failure Handling & Retries](#failure-handling--retries)
+- [Idempotency & Safety](#idempotency--safety)
+- [Job Types](#job-types)
+- [Scaling](#scaling)
+- [Multi-Queue Workload Isolation](#multi-queue-workload-isolation)
+- [Rate Limiting](#rate-limiting)
+- [Graceful Shutdown](#graceful-shutdown)
+- [Observability](#observability)
+- [Dead Letter Queue (DLQ)](#dead-letter-queue-dlq)
+- [Operational Dashboard](#operational-dashboard)
+- [Payload Validation](#payload-validation)
+- [Dockerised Deployment](#dockerised-deployment)
+- [Continuous Integration](#continuous-integration)
+- [Configuration](#configuration)
+- [Getting Started](#getting-started)
+- [Project Structure](#project-structure)
+- [Learning Outcomes](#learning-outcomes)
 
 ---
 
-## 🛠️ Tech Stack
+## Overview
 
-- **Node.js** – JavaScript runtime
-- **Express.js** – API server framework
-- **BullMQ** – Redis-based job queue library
-- **Redis** – Durable message broker and state store
-- **ioredis** – Redis client for Node.js
-- **dotenv** – Environment variable management
-- **nodemon** – Development hot-reloading
-- **concurrently** – Multi-process development orchestration
+This system showcases how to build reliable background processing infrastructure that goes far beyond a single request–response API. It supports API-triggered jobs, system-initiated jobs, and scheduled recurring jobs — all with idempotency, retry safety, observability, and at-most-once side effect guarantees.
+
+**Core capabilities:**
+
+| Capability | Description |
+|---|---|
+| Asynchronous job execution | Jobs run independently of API requests |
+| Durable job queuing | Redis-backed persistence ensures no job loss |
+| Decoupled processes | API and worker are fully independent |
+| Observable lifecycle | Real-time job status tracking via API |
+| Idempotent operations | Safe under retries, crashes, and duplicate requests |
+| Automatic retries with backoff | Configurable retry strategy per job |
+| Scheduled jobs | Time-based triggers without external cron |
+| Multi-queue isolation | Workloads separated to prevent cross-queue interference |
+| Dead Letter Queue | Terminal failures isolated and inspectable |
+| Horizontal scaling | Workers scale independently from the API |
 
 ---
 
-## 🏗️ Architecture Overview
+## Tech Stack
+
+| Technology | Role |
+|---|---|
+| **Node.js** | JavaScript runtime |
+| **Express.js** | API server framework |
+| **BullMQ** | Redis-based job queue library |
+| **Redis** | Durable message broker and state store |
+| **ioredis** | Redis client for Node.js |
+| **Zod** | Schema-based payload validation |
+| **Prometheus** | Metrics exposition format |
+| **BullBoard** | Real-time operational dashboard |
+| **Jest + Supertest** | Integration testing |
+| **Docker + Compose** | Containerised deployment |
+| **GitHub Actions** | Continuous integration pipeline |
+| **dotenv** | Environment variable management |
+| **nodemon / concurrently** | Development workflow tooling |
+
+---
+
+## Architecture
 
 ```
 ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-│  API Server │──────▶│Redis Queue  │──────▶│   Worker    │
+│  API Server │──────▶│ Redis Queue │──────▶│   Worker    │
 │  (Producer) │       │  (BullMQ)   │       │ (Consumer)  │
 └─────────────┘       └─────────────┘       └─────────────┘
 ```
 
-### Components
+The system is composed of three independent components:
 
-- **API Server** – Acts as a job producer, accepts job requests and enqueues them
-- **Redis Queue** – Serves as a durable intermediary between API and workers
-- **Worker Process** – Consumes jobs from the queue and executes them asynchronously
+- **API Server** — Accepts job submissions, validates payloads, and enqueues jobs. Acts as the system boundary; only valid domain objects enter the queue.
+- **Redis Queue** — Serves as the durable intermediary between producers and consumers. Manages job state, retry scheduling, and locking.
+- **Worker Process** — Consumes jobs from the queue and executes them asynchronously. Fully decoupled from the API lifecycle.
 
-API availability and worker availability are fully decoupled, enabling:
+API availability and worker availability are independent, which enables:
 
 - Independent scaling of producers and consumers
-- Fault isolation
+- Fault isolation between components
 - Zero-downtime deployments
+
+### Containerised Topology (Phase 16+)
+
+```
+API Container
+     │
+     ▼
+Redis Container
+     │
+     ▼
+Worker Container(s)
+```
+
+Each component runs in isolation and communicates over a shared Docker network.
 
 ---
 
-## 📤 Job Submission
+## Job Lifecycle
 
-Jobs are submitted via `POST /jobs` as structured JSON payloads.
+Each job has a well-defined, observable lifecycle managed by BullMQ and stored in Redis.
 
-### Example Request
+| State | Description |
+|---|---|
+| `waiting` | Job is queued but not yet being processed |
+| `active` | Job is currently being processed by a worker |
+| `completed` | Job finished successfully |
+| `failed` | Job execution failed after all retry attempts |
+
+> **Note:** Jobs remain in the `waiting` state when no workers are running. This is intentional and correct — it demonstrates that job creation and job execution are fully decoupled.
+
+---
+
+## API Reference
+
+### Submit a Job
+
+```
+POST /jobs
+```
+
+**Request body:**
 
 ```json
 {
@@ -73,7 +146,7 @@ Jobs are submitted via `POST /jobs` as structured JSON payloads.
 }
 ```
 
-### Example Response
+**Response:**
 
 ```json
 {
@@ -82,38 +155,17 @@ Jobs are submitted via `POST /jobs` as structured JSON payloads.
 }
 ```
 
-**Note:** The API responds immediately. Job execution happens asynchronously.
-
-### Development Testing
-
-During development, **Postman** is used as the primary client to simulate real application requests.
+The API responds immediately with `202 Accepted`. Job execution happens asynchronously.
 
 ---
 
-## 📊 Job Lifecycle & Status Tracking
-
-Each job has an observable lifecycle managed by BullMQ.
-
-### Job States
-
-| State       | Description                                   |
-| ----------- | --------------------------------------------- |
-| `waiting`   | Job is queued but not yet being processed     |
-| `active`    | Job is currently being processed by a worker  |
-| `completed` | Job finished successfully                     |
-| `failed`    | Job execution failed after all retry attempts |
-
-**Note:** Jobs can remain in the `waiting` state when no workers are running. This is intentional and correct.
-
-### Job Status API
-
-Query job status using:
+### Query Job Status
 
 ```
 GET /jobs/:id/status
 ```
 
-#### Example Response
+**Response:**
 
 ```json
 {
@@ -126,65 +178,86 @@ GET /jobs/:id/status
 }
 ```
 
-This confirms that job creation and job execution are fully decoupled.
+---
+
+### Dead Letter Queue
+
+```
+GET /jobs/dlq
+```
+
+Returns all permanently failed jobs with their full failure context.
+
+```
+POST /jobs/dlq/:id/replay
+```
+
+Replays a specific DLQ job. Creates a new job and preserves lineage metadata.
 
 ---
 
-## 🔄 Failure Handling, Retries & Backoff
+### Metrics
+
+```
+GET /metrics          # API and process-level metrics
+GET /metrics          # Worker job execution metrics (separate port)
+```
+
+---
+
+### Operational Dashboard
+
+```
+GET /admin/queues     # BullBoard UI (protected by Basic Auth)
+```
+
+---
+
+## Failure Handling & Retries
 
 The system is designed to handle failures gracefully without crashing workers or blocking other jobs.
 
-### Failure Handling
+### Failure Model
 
-- Job execution errors are thrown inside the worker
-- Failed jobs do not crash the worker process
-- Failure reasons are recorded and exposed via the status API
+- Job failures are signaled by throwing errors inside the worker
+- A failed job does not crash the worker or affect other jobs in the queue
+- Failure reasons, attempt counts, and timestamps are recorded and exposed via the status API
 
-### Automatic Retries
+### Retry Strategy
 
-- Jobs are retried automatically when execution fails
-- Retry behavior is configured at job creation time
-- Retries are limited to a fixed number of attempts
+- Retries are configured at job creation time
+- A fixed maximum number of retry attempts is enforced
+- Retry execution is managed entirely by BullMQ — workers are not responsible for retry logic
 
-### Backoff Strategy
+### Backoff Policy
 
-- A fixed delay is applied between retries
+- A fixed backoff delay is applied between retries
 - This prevents retry storms and reduces pressure on external dependencies
 
 ### Dead-Letter Behavior
 
-- After all retry attempts are exhausted, jobs stop retrying
-- Failed jobs remain stored in Redis and are fully inspectable
+- After all retry attempts are exhausted, the job transitions to terminal `failed` state
+- Failed jobs are automatically moved to the Dead Letter Queue (DLQ)
 - Workers continue processing other jobs without interruption
-
-This approach ensures resilience while keeping the worker logic simple and predictable.
 
 ---
 
-## 🔒 Idempotency & Safety
+## Idempotency & Safety
 
 The system guarantees safe background job processing under retries, crashes, and duplicate requests.
 
 ### Idempotent Job Creation
 
-- Clients **must** provide an `idempotencyKey` for every job
-- Duplicate requests with the same key result in a single job
+- Clients **must** provide an `idempotencyKey` with every job submission
+- Duplicate requests with the same key result in a single job — no duplicates are created
 - Idempotency keys are hashed to generate Redis/BullMQ-safe job IDs
 - Internal job IDs are never reused as client idempotency keys
 
-### Retry-Safe Side Effects
+### At-Most-Once Side Effects
 
 - Side effects are protected using a Redis reservation pattern (`SET NX`)
-- Side effects execute **at most once**, even if a worker crashes
+- Side effects execute **at most once**, even if a worker crashes mid-execution
 - Retries stop as soon as a job successfully completes
-- Failed jobs are retried up to a fixed limit and then dead-lettered
-
-### Observability Guarantees
-
-Job states (`waiting`, `active`, `completed`, `failed`) accurately reflect execution. Worker logs distinguish between:
-
-- Normal success
-- Recovery success after retries
 
 ### Design Principle
 
@@ -194,1128 +267,398 @@ Job states (`waiting`, `active`, `completed`, `failed`) accurately reflect execu
 
 ---
 
-## ⏰ Background-Only & Scheduled Jobs
+## Job Types
 
-The system supports three types of job creation:
+The system supports three modes of job creation:
 
-1. **API-triggered jobs** – Created via HTTP POST requests
-2. **System-triggered jobs** – Created programmatically by internal scripts
-3. **Scheduled jobs** – Created automatically on a time-based schedule
+### 1. API-Triggered Jobs
 
-### System-Initiated Jobs (No HTTP Required)
+Created via `POST /jobs`. The standard flow for user-initiated or application-initiated work.
 
-- Introduced a **system producer** that enqueues jobs without any API call
-- Jobs are created by running a Node.js script
-- Reuses the same queue, Redis connection, and idempotency logic
-- Worker remains unchanged
+### 2. System-Triggered Jobs
+
+A standalone Node.js producer script enqueues jobs directly — without any HTTP call. It reuses the same queue, Redis connection, and idempotency logic. Workers remain unchanged.
 
 This proves that job producers are not tied to HTTP and can exist independently.
 
-### Scheduled Jobs (Cron-like)
+### 3. Scheduled Jobs
 
-- Added a lightweight scheduler using `setInterval`
-- Scheduler runs as a separate process
-- Jobs are triggered on a fixed time interval
-- No external cron or infrastructure required
+A lightweight scheduler using `setInterval` runs as a separate process and enqueues jobs at fixed time intervals. No external cron or infrastructure is required.
 
-### Safety Rules for Scheduled Jobs
-
-To prevent duplication and unsafe execution:
-
-- Scheduled jobs use **time-bucketed idempotency keys**
-- Same time window → same job → no duplicates
-- Scheduler is stateless and restart-safe
-- Worker retries and side-effect safety remain enforced
-
-### Key Outcome
-
-All job types benefit from:
-
-- Idempotent job creation
-- Retry-safe execution
-- At-most-once side effects
-- Redis as the source of truth
-
-This completes the transition from request-response background work to autonomous backend processing.
-
-Observability & Monitoring (Phase 6)
-
-The system includes built-in observability to make asynchronous job execution transparent, debuggable, and production-aligned.
-
-Observability is implemented without altering job execution semantics or failure behavior.
-
-Structured Logging
-
-Worker logs are structured and machine-readable
-
-Every job-related log includes a stable jobId
-
-Logs represent job lifecycle events, not HTTP request flows
-
-Enables tracing a job across retries, failures, and recovery paths
-
-Example events include:
-
-job.started
-
-job.side_effect_started
-
-job.completed
-
-job.completed_recovered
-
-job.failed
-
-Metrics
-
-The worker emits Prometheus-compatible metrics for job execution.
-
-Job Metrics
-
-Execution counters
-
-Successful job executions
-
-Failed execution attempts (including retries)
-
-Latency histograms
-
-Execution duration for successful jobs only
-
-Bucketed to expose performance distribution
-
-Metrics are labeled by job type to support per-job analysis.
-
-Metrics Endpoints
-Process Endpoint Description
-API /metrics API and process-level metrics
-Worker /metrics (separate port) Job execution metrics
-
-Each process exposes its own metrics endpoint, reflecting real-world distributed systems where workers scale independently.
-
-Observability Design Principles
-
-Metrics are read-only signals
-
-Metrics failures never impact job execution
-
-Logs explain what happened
-
-Metrics explain how often and how long
-
-This separation ensures observability does not interfere with correctness.
-
-☠️ Dead Letter Queue (DLQ) (Phase 7)
-
-The system includes an explicit Dead Letter Queue (DLQ) to handle terminal job failures safely and transparently.
-
-The DLQ isolates permanently failed jobs without affecting normal job execution.
-
-When a Job Enters the DLQ
-
-A job is moved to the DLQ only when:
-
-All retry attempts are exhausted
-
-The job reaches a terminal failure state
-
-Retrying jobs are not considered dead and never enter the DLQ.
-
-DLQ Behavior
-
-DLQ is a separate BullMQ queue
-
-No worker consumes DLQ jobs
-
-Jobs enter the DLQ exactly once
-
-DLQ jobs are inert and do not trigger side effects
-
-This ensures failure isolation and prevents cascading errors.
-
-DLQ Contents
-
-Each DLQ entry includes:
-
-Original job ID
-
-Job type
-
-Job payload
-
-Failure reason
-
-Number of attempts
-
-Failure timestamp
-
-This makes DLQ jobs inspectable and replay-ready.
-
-DLQ Metrics
-
-The worker exposes a dedicated DLQ metric:
-
-dlq_jobs_total
-
-Counts permanently failed jobs
-
-Labeled by job type
-
-This metric complements retry-level failure metrics and provides clear operational visibility.
-
-Why This Matters
-
-Explicit DLQs allow the system to:
-
-Distinguish between recoverable and unrecoverable failures
-
-Preserve failure context for inspection
-
-Scale safely without hiding broken jobs
-
-Support future replay and alerting workflows
-
-🔁 DLQ Replay Semantics (Phase 8)
-
-The system supports explicit replay of Dead Letter Queue (DLQ) jobs to allow safe recovery from terminal failures.
-
-Replay is intentionally manual and controlled.
-
-What Replay Means
-
-Replay does not resurrect failed jobs.
-
-Instead, replay:
-
-Creates a new job
-
-Uses the original job payload
-
-Preserves lineage metadata
-
-Executes under normal retry and idempotency rules
-
-This avoids hidden state reuse and preserves correctness.
-
-How Replay Works
-
-A DLQ entry is inspected
-
-A specific DLQ Job ID is selected
-
-A new job is enqueued into the main job queue
-
-Lineage metadata is attached:
-
-replayedFromJobId
-
-replayedAt
-
-The original DLQ entry remains unchanged.
-
-Replay Safety Guarantees
-
-Replay always generates a new job ID
-
-Replay does not bypass retries or side-effect protection
-
-Replay does not delete or modify DLQ records
-
-Replay never occurs automatically
-
-Each replay is an explicit operational decision.
-
-Failure During Replay
-
-If a replayed job fails again:
-
-It follows normal retry behavior
-
-On terminal failure, it enters the DLQ as a new DLQ entry
-
-Previous DLQ entries remain intact
-
-This ensures replay attempts are fully auditable.
-
-Why This Matters
-
-Explicit replay semantics allow the system to:
-
-Recover safely from permanent failures
-
-Preserve historical failure context
-
-Avoid retry storms or hidden loops
-
-Support operational workflows used in real systems
-
-Replay completes the failure lifecycle without sacrificing correctness.
-
-Horizontal Scaling & Worker Concurrency (Phase 9)
-
-The system supports both horizontal and vertical scaling.
-
-Horizontal Scaling
-
-Multiple worker processes can run simultaneously, all consuming from the same queue.
-
-Example:
-
-API
-Worker 1
-Worker 2
-Worker 3
-
-
-Each worker:
-
-Competes for jobs
-
-Processes different jobs
-
-May handle retries from other workers
-
-Maintains exclusive execution per job attempt
-
-Redis-based locking ensures safe distributed processing.
-
-Per-Worker Concurrency
-
-Workers support configurable concurrency:
-
-{
-  connection,
-  concurrency: 3
-}
-
-
-This allows a single worker to process multiple jobs in parallel.
-
-Scaling formula:
-
-Total parallel jobs =
-Number of workers × concurrency
-
-
-Example:
-
-3 workers × concurrency 3 = 9 parallel jobs
-
-Observability in a Distributed Setup
-
-Each worker exposes a metrics endpoint:
-
-http://localhost:3001/metrics
-http://localhost:3002/metrics
-http://localhost:3003/metrics
-
-
-Metrics are process-local and intended for external aggregation tools such as Prometheus.
-
-Retry Behavior Under Scale
-
-Retries are not bound to a specific worker.
-
-A failed job attempt:
-
-Is released back to the queue
-
-May be retried by any available worker
-
-Remains protected by distributed locking
-
-This ensures fairness and resilience.
-
-Why This Matters
-
-Phase 9 validates that the system:
-
-Scales safely under concurrent load
-
-Maintains idempotency guarantees
-
-Preserves failure isolation
-
-Increases throughput predictably
-
-The project now behaves as a distributed job processing system rather than a single-instance background worker.
-
-
-🔀 Multi-Queue Workload Isolation (Phase 10)
-
-The system now supports multiple isolated job queues to prevent cross-workload interference.
-
-Why This Matters
-
-Previously, all jobs shared a single queue.
-
-This meant:
-
-Heavy jobs could delay lightweight jobs
-
-Concurrency limits applied globally
-
-Backpressure from one job type affected all others
-
-Phase 10 introduces workload segmentation.
-
-Active Queues
-Queue Name	Job Type	Purpose
-email-queue	welcome-email	Email notifications
-report-queue	generate-report	Heavy report jobs
-cleanup-queue	cleanup-temp	Maintenance tasks
-
-Each queue:
-
-Has independent FIFO ordering
-
-Has independent concurrency configuration
-
-Is processed by its own Worker instance
-
-Per-Queue Concurrency
-
-Example configuration:
-
-Queue	Concurrency
-email-queue	3
-report-queue	2
-cleanup-queue	1
-
-This enables workload-aware resource allocation.
-
-Isolation Guarantees
-
-Heavy report jobs cannot delay email jobs
-
-Cleanup tasks cannot block report generation
-
-Retry storms remain confined to their queue
-
-DLQ behavior remains correct per job type
-
-Isolation is implemented at the Redis queue level.
-
-Scaling Model
-
-Total parallel execution:
-
-(number of workers) × (sum of per-queue concurrency)
-
-Example:
-
-1 worker → 6 parallel jobs
-2 workers → 12 parallel jobs
-
-This provides both horizontal and segmented scaling.
-
-After Phase 10, the system behaves as a workload-aware distributed job processor rather than a single-queue background worker.
-
-🛑 Graceful Shutdown & Lifecycle Safety (Phase 11)
-
-The worker now supports graceful shutdown to ensure safe termination during restarts, deployments, and manual interrupts.
-
-Why This Matters
-
-Without graceful shutdown:
-
-Active jobs could be interrupted
-
-Side effects could remain incomplete
-
-Redis connections might close abruptly
-
-Metrics servers could leak ports
-
-Phase 11 eliminates these risks.
-
-How It Works
-
-The worker listens for:
-
-SIGTERM (container shutdown)
-
-SIGINT (Ctrl + C)
-
-On shutdown:
-
-Stops fetching new jobs
-
-Waits for active jobs to finish
-
-Closes all worker instances
-
-Shuts down the metrics server
-
-Disconnects from Redis
-
-Exits cleanly
-
-Example Behavior
-
-If a job is running and the worker receives SIGINT:
-
-Shutdown is initiated
-
-The active job completes normally
-
-Worker exits only after completion
-
-No partial execution occurs.
-
-Production Benefits
-
-Graceful shutdown enables:
-
-Safe Docker restarts
-
-Kubernetes rolling deployments
-
-Zero-downtime worker upgrades
-
-Controlled scale-down events
-
-This ensures operational reliability in distributed environments.
-
-System Maturity
-
-With Phase 11 complete, the system now supports:
-
-Multi-queue workload isolation
-
-Distributed horizontal scaling
-
-DLQ and replay semantics
-
-Observability via metrics and logs
-
-Graceful lifecycle management
-
-The project now reflects real-world distributed job processing behavior.
-
-📊 Queue Depth Metrics & Backpressure Detection (Phase 12)
-
-Phase 12 introduces queue depth monitoring to provide real-time visibility into workload pressure.
-
-Why This Matters
-
-Before Phase 12, the system measured:
-
-Job counts
-
-Failures
-
-Latency
-
-But it did not measure backlog.
-
-This made it impossible to detect:
-
-Queue buildup
-
-Under-provisioned workloads
-
-Traffic spikes
-
-Retry storms
-
-New Metrics
-
-For each queue:
-
-queue_waiting_jobs
-
-queue_active_jobs
-
-queue_delayed_jobs
-
-Accessible via:
-
-GET /metrics
-
-Example Output
-queue_waiting_jobs{queue="report-queue"} 12
-queue_active_jobs{queue="report-queue"} 2
-queue_waiting_jobs{queue="email-queue"} 0
-
-
-This immediately shows:
-
-Report queue is under pressure.
-
-Email queue is unaffected.
-
-Isolation is working correctly.
-
-How It Works
-
-Metrics are polled every 5 seconds.
-
-Collection is non-blocking.
-
-Polling stops during graceful shutdown.
-
-Metrics are labeled per queue.
-
-Operational Benefits
-
-Queue depth metrics enable:
-
-Intelligent scaling decisions
-
-Alert threshold configuration
-
-Workload imbalance detection
-
-Capacity planning
-
-Backpressure awareness
-
-With Phase 12 complete, the system now supports execution safety, lifecycle safety, and operational intelligence.
-
-🎯 Where You Are Now
-
-You have built a system that supports:
-
-Workload isolation
-
-Distributed scaling
-
-Retry safety
-
-DLQ & replay
-
-Graceful shutdown
-
-Observability
-
-Backpressure detection
-
-This is now a legitimate distributed job processing platform.
-
-🚦 Per-Queue Rate Limiting & Throughput Control (Phase 13)
-
-Phase 13 introduces per-queue rate limiting to control how frequently jobs begin execution.
-
-This protects downstream services from overload and ensures predictable workload execution.
-
-Why Rate Limiting Matters
-
-Concurrency limits control how many jobs run simultaneously.
-
-Rate limits control how fast jobs start.
-
-Without rate limiting, scaling workers can overwhelm:
-
-Email providers
-
-Databases
-
-External APIs
-
-Internal services
-
-Rate limiting ensures execution remains within safe limits.
-
-Queue Rate Limits
-
-Each queue has independent rate limits:
-
-Queue	Concurrency	Rate Limit
-email-queue	3	5 jobs/sec
-report-queue	2	2 jobs/sec
-cleanup-queue	1	1 job/sec
-
-This enables workload-aware throughput control.
-
-Example Behavior
-
-If 20 report jobs are submitted instantly:
-
-Only 2 jobs start per second
-
-Remaining jobs wait safely in the queue
-
-Email and cleanup queues remain unaffected
-
-This prevents report workload from overwhelming system resources.
-
-Isolation + Rate Limiting
-
-Because queues are isolated:
-
-Rate limiting applies independently per workload
-
-Email processing remains unaffected by report workload pressure
-
-Cleanup jobs remain independently controlled
-
-This ensures safe and predictable distributed execution.
-
-Operational Benefits
-
-Rate limiting enables:
-
-Safe horizontal scaling
-
-Dependency protection
-
-Retry storm containment
-
-Controlled execution velocity
-
-Production-safe workload management
-
-With Phase 13 complete, the system now supports safe, observable, and controlled distributed job execution.
-
-🖥 Operational Dashboard (Phase 14 – BullBoard)
-
-Phase 14 introduces a centralized operational dashboard using BullBoard for real-time queue monitoring and management.
-
-Dashboard URL:
-
-http://localhost:3000/admin/queues
-
-Why This Was Needed
-
-As the system evolved to include:
-
-Multiple isolated queues
-
-Rate limiting
-
-DLQ handling
-
-Backpressure metrics
-
-Manual debugging via logs became inefficient.
-
-BullBoard provides a visual management layer for queue inspection and recovery.
-
-Features
-
-View job payloads
-
-Track lifecycle states (waiting → active → completed)
-
-Inspect error messages and stack traces
-
-Retry failed jobs
-
-Delete problematic jobs
-
-Clean completed/failed job sets
-
-Monitor dead-letter-queue entries
-
-Distributed Visibility
-
-Because BullBoard connects directly to Redis:
-
-It provides cluster-wide visibility
-
-Works across multiple workers
-
-Aggregates job states across deployments
-
-🔐 Secured Dashboard (Phase 14.1)
-
-Phase 14.1 secures the BullBoard dashboard with Basic Authentication.
-
-Environment variables:
-
-ADMIN_USER=<username>
-ADMIN_PASSWORD=<password>
-
-
-The dashboard is protected via middleware and cannot be accessed without valid credentials.
-
-Why Security Matters
-
-BullBoard allows:
-
-Retrying jobs
-
-Deleting jobs
-
-Cleaning queues
-
-Without authentication, this becomes a critical vulnerability.
-
-Phase 14.1 ensures:
-
-Controlled operational access
-
-No public exposure of management surface
-
-Environment-driven credential configuration
-
-System Maturity After Phase 14
-
-The system now supports:
-
-Isolation
-
-Concurrency control
-
-Rate limiting
-
-Backpressure visibility
-
-Graceful shutdown
-
-DLQ management
-
-Visual operational control
-
-Secured administrative access
-
-This transitions the system from backend job processor to operationally manageable distributed platform.
-
-Integrated Operational Observability (Phase 14 – BullBoard)
-
-Phase 14 introduces a centralized operational dashboard to provide real-time inspection and management of all job queues.
-
-As the system scaled in complexity, reliance on logs and Redis CLI became insufficient for efficient debugging and operational control.
-
-BullBoard was integrated into the existing Express API server to provide a unified entry point for both API traffic and human operational interaction.
-
-Architectural Integration
-
-Mounted at /admin/queues
-
-Uses ExpressAdapter
-
-Uses BullMQAdapter
-
-Dynamically maps queues from queueRegistry
-
-Includes dead-letter-queue
-
-This ensures minimal overhead when new queues are added.
-
-Operational Capabilities
-
-Real-Time Inspection:
-
-View job payloads
-
-Track state transitions
-
-Inspect failure stack traces
-
-Monitor retry attempts
-
-Manual Intervention:
-
-Retry failed jobs
-
-Remove poison-pill jobs
-
-Clean queue states
-
-Inspect DLQ entries
-
-Cluster-Wide Visibility:
-
-Because the dashboard connects directly to Redis, it reflects the global state of all workers regardless of deployment topology.
-
-Secured Operational Surface (Phase 14.1)
-
-Phase 14.1 secures the BullBoard dashboard using Basic Authentication middleware.
-
-Security Controls
-
-Route protection via basicAuth middleware
-
-Credentials defined via environment variables
-
-No hardcoded secrets
-
-Unauthorized access returns HTTP 401
-
-Operational Impact
-
-Phase 14 and 14.1 together provide:
-
-Reduced debugging time
-
-Interactive operational recovery
-
-Controlled administrative access
-
-Secure management interface
-
-The system now includes both programmatic and authenticated human-operable observability layers.
-
-🛡 Payload Validation & Boundary Hardening (Phase 15)
-
-Phase 15 introduces structured payload validation at the API level using Zod.
-
-Before this phase, malformed payloads could reach Redis, triggering unnecessary retries, DLQ pollution, and wasted worker resources.
-
-Phase 15 ensures only valid domain objects enter the system.
-
-Why This Matters
-
-Without API-level validation:
-
-Invalid jobs consume Redis memory
-
-Workers waste CPU cycles processing bad input
-
-DLQ becomes polluted with user errors
-
-Metrics become misleading
-
-Validation at the boundary keeps the queue system clean and stable.
-
-Implementation
-
-Centralized validation layer (jobSchemas.js)
-
-Zod schemas per job type
-
-Validation occurs before enqueue
-
-Invalid payloads return 400 Bad Request
-
-Unsupported job types are rejected immediately
-
-Example Behavior
-
-Invalid request:
-
-{
-  "type": "welcome-email",
-  "payload": {}
-}
-
-
-Response:
-
-400 Bad Request
-
-
-Valid request:
-
-{
-  "type": "welcome-email",
-  "idempotencyKey": "user-123",
-  "payload": {
-    "email": "user@example.com"
-  }
-}
-
-
-Response:
-
-202 Accepted
-
-System Impact
-
-After Phase 15:
-
-Redis stores only validated domain objects
-
-Workers process trusted payloads
-
-DLQ reflects true runtime failures
-
-Metrics represent actual system behavior
-
-System boundary is formally enforced
-
-This marks the transition from basic validation to structured boundary protection.
-
-Dockerised Deployment (Phase 16)
-
-Phase 16 introduces containerisation using Docker, transforming the system into a reproducible, environment-independent deployment.
-
-Why This Matters
-
-Before Docker:
-
-Required local Node.js setup
-
-Required manually running Redis
-
-Environment inconsistencies across machines
-
-After Docker:
-
-Entire system runs with a single command
-
-Consistent runtime across environments
-
-Easy simulation of distributed systems
-
-System Topology
-API Container → Redis Container → Worker Container(s)
-
-Each component runs in isolation and communicates via Docker networking.
-
-How to Run
-docker compose up
-Horizontal Scaling
-
-Workers can be scaled dynamically:
-
-docker compose up --scale worker=3
-
-This enables:
-
-Parallel job processing
-
-Load distribution across workers
-
-Realistic distributed system simulation
-
-Key Improvements
-
-Standardised environment across machines
-
-Simplified onboarding and setup
-
-Production-like execution locally
-
-Foundation for CI/CD pipelines
-
-⚙️ Continuous Integration (Phase 17)
-
-Phase 17 introduces a CI pipeline using GitHub Actions to automatically validate the system on every code change.
-
-Why This Matters
-
-Before CI:
-
-Testing was manual
-
-Errors could go unnoticed
-
-No automated validation
-
-After CI:
-
-Every push is automatically tested
-
-System is validated from scratch
-
-Prevents regressions
-
-CI Workflow
-
-On every push:
-
-Checkout code
-→ Build Docker containers
-→ Start API + Worker + Redis
-→ Run integration tests
-→ Pass / Fail
-What CI Validates
-
-Docker builds successfully
-
-Services start correctly
-
-API is reachable
-
-Jobs can be submitted
-
-Worker processes jobs without crashing
-
-Testing Approach
-
-Uses Jest + Supertest
-
-Follows black-box integration testing
-
-Tests system behavior via API endpoints
-
-Independent of internal implementation
-
-Example Checks
-
-GET / → API health check
-
-POST /jobs → job submission
-
-Worker processes jobs asynchronously
+**Safety rules for scheduled jobs:**
+- Jobs use **time-bucketed idempotency keys** — the same time window always produces the same job ID, preventing duplicates
+- The scheduler is stateless and restart-safe
+- Retry and side-effect safety guarantees remain fully enforced
 
 ---
 
-## ⚙️ Configuration
+## Scaling
 
-All infrastructure configuration is externalized.
+### Horizontal Scaling
+
+Multiple worker processes can run simultaneously, all consuming from the same queue:
+
+```
+API → Redis → Worker 1
+               Worker 2
+               Worker 3
+```
+
+Each worker competes for jobs independently. Redis-based locking ensures safe distributed execution — each job attempt is processed by exactly one worker.
+
+### Per-Worker Concurrency
+
+Workers support configurable concurrency, allowing a single worker to process multiple jobs in parallel:
+
+```
+Total parallel jobs = number of workers × concurrency per worker
+```
+
+For example: 3 workers × concurrency 3 = **9 parallel jobs**
+
+---
+
+## Multi-Queue Workload Isolation
+
+All jobs share no queue by default. Workloads are segmented into independent queues to prevent cross-workload interference.
+
+| Queue | Job Type | Concurrency |
+|---|---|---|
+| `email-queue` | `welcome-email` | 3 |
+| `report-queue` | `generate-report` | 2 |
+| `cleanup-queue` | `cleanup-temp` | 1 |
+
+Each queue has independent FIFO ordering, independent concurrency limits, and is processed by its own Worker instance.
+
+**Isolation guarantees:**
+- Heavy report jobs cannot delay email notifications
+- Retry storms in one queue do not affect others
+- DLQ behavior is correct and scoped per job type
+
+---
+
+## Rate Limiting
+
+Per-queue rate limits control how fast jobs begin execution, protecting downstream services from overload.
+
+| Queue | Concurrency | Rate Limit |
+|---|---|---|
+| `email-queue` | 3 | 5 jobs/sec |
+| `report-queue` | 2 | 2 jobs/sec |
+| `cleanup-queue` | 1 | 1 job/sec |
+
+Rate limiting applies independently per queue, ensuring email processing is never affected by a burst of report jobs.
+
+---
+
+## Graceful Shutdown
+
+The worker listens for `SIGTERM` (container shutdown) and `SIGINT` (Ctrl+C). On receiving either signal, it:
+
+1. Stops fetching new jobs
+2. Waits for all active jobs to complete
+3. Closes all worker instances
+4. Shuts down the metrics server
+5. Disconnects from Redis
+6. Exits cleanly
+
+No partial job execution occurs. This enables safe Docker restarts, Kubernetes rolling deployments, and zero-downtime worker upgrades.
+
+---
+
+## Observability
+
+### Structured Logging
+
+Worker logs are structured and machine-readable. Every log entry is correlated by a stable `jobId`, enabling full lifecycle tracing across retries, failures, and recovery paths.
+
+Logged events include:
+
+- `job.started`
+- `job.side_effect_started`
+- `job.completed`
+- `job.completed_recovered`
+- `job.failed`
+
+### Prometheus Metrics
+
+The system emits Prometheus-compatible metrics, labeled by job type.
+
+**Execution counters:**
+- Successful job executions
+- Failed execution attempts (including retries)
+- DLQ entries (`dlq_jobs_total`)
+
+**Latency histograms:**
+- Execution duration for successful jobs only (bucketed to expose distribution, not just averages)
+- Failed executions are intentionally excluded to prevent skewed performance signals
+
+**Queue depth metrics (polled every 5 seconds):**
+- `queue_waiting_jobs{queue="..."}` — current backlog
+- `queue_active_jobs{queue="..."}` — jobs in flight
+- `queue_delayed_jobs{queue="..."}` — jobs pending retry
+
+Each process exposes its own `/metrics` endpoint, reflecting real-world distributed systems where workers scale independently.
+
+**Design principle:** Metrics are read-only signals. Metrics failures never impact job execution.
+
+---
+
+## Dead Letter Queue (DLQ)
+
+The DLQ isolates permanently failed jobs without affecting normal job execution.
+
+### When a Job Enters the DLQ
+
+A job is moved to the DLQ only when all retry attempts are exhausted and it reaches a terminal failure state. Retrying jobs are never considered dead.
+
+### DLQ Behavior
+
+- The DLQ is a separate BullMQ queue with no attached worker
+- Jobs enter the DLQ exactly once
+- DLQ jobs are inert — they do not trigger side effects
+- Each DLQ entry preserves: original job ID, job type, payload, failure reason, attempt count, and failure timestamp
+
+### DLQ Replay
+
+Replay creates a **new job** from the original payload — it does not resurrect the failed job. Lineage metadata is attached:
+
+- `replayedFromJobId`
+- `replayedAt`
+- `replayCount`
+
+**Safety guarantees:**
+- Replay always generates a new job ID
+- Replay does not bypass retries or side-effect protection
+- Replay never modifies or deletes the original DLQ entry
+- Replay count is tracked and limited to prevent infinite loops
+- Failure-inducing payload flags (e.g. `forceFail`) are stripped on replay
+
+If a replayed job fails again, it follows normal retry behavior and enters the DLQ as a new entry. All replay attempts are fully auditable.
+
+---
+
+## Operational Dashboard
+
+BullBoard provides a visual management layer for real-time queue inspection and recovery.
+
+**URL:** `http://localhost:3000/admin/queues`  
+**Auth:** Protected by Basic Authentication (credentials via environment variables)
+
+**Capabilities:**
+
+- View job payloads and state transitions
+- Inspect failure reasons and stack traces
+- Retry failed jobs manually
+- Delete problematic jobs
+- Clean completed/failed job sets
+- Monitor DLQ entries
+
+Because BullBoard connects directly to Redis, it provides cluster-wide visibility across all workers regardless of deployment topology.
+
+---
+
+## Payload Validation
+
+The API boundary is formally hardened using **Zod schema validation**. Validation occurs before any job is enqueued — only valid domain objects enter Redis.
+
+Each job type has a dedicated schema enforcing:
+- Required fields per job type
+- Correct data types
+- Email format validation
+- Optional test flags (e.g. `forceFail`)
+
+**Invalid request:**
+```json
+{ "type": "welcome-email", "payload": {} }
+→ 400 Bad Request
+```
+
+**Valid request:**
+```json
+{
+  "type": "welcome-email",
+  "idempotencyKey": "user-123",
+  "payload": { "email": "user@example.com" }
+}
+→ 202 Accepted
+```
+
+Without this boundary enforcement, invalid jobs would consume Redis memory, waste worker CPU cycles, pollute the DLQ with user errors, and corrupt metrics signals.
+
+---
+
+## Dockerised Deployment
+
+The entire system runs with a single command:
+
+```bash
+docker compose up
+```
+
+### System Topology
+
+```
+API Container → Redis Container → Worker Container(s)
+```
+
+Each service runs in isolation and communicates over a Docker network. Redis is available at `redis://redis:6379` within the network.
+
+### Horizontal Worker Scaling
+
+```bash
+docker compose up --scale worker=3
+```
+
+This enables parallel job processing, load distribution across workers, and realistic simulation of distributed system behavior.
+
+---
+
+## Continuous Integration
+
+A GitHub Actions CI pipeline automatically validates the system on every push and pull request.
+
+### CI Workflow
+
+```
+Checkout → Build Docker Images → Start Services → Run Integration Tests → Pass / Fail
+```
+
+### What CI Validates
+
+| Check | Description |
+|---|---|
+| System startup | Docker containers build and services start without errors |
+| API availability | Health endpoint responds successfully |
+| Job submission | Valid jobs are accepted (`202 Accepted`) |
+| Worker stability | Jobs are processed without runtime failures |
+| Job lifecycle | Jobs transition `waiting → active → completed` |
+| Idempotency | Duplicate requests with same key return the same job ID |
+| Retry handling | Failed jobs are retried and reach terminal `failed` state |
+| DLQ isolation | Permanently failed jobs are isolated in the DLQ |
+| DLQ retrieval | DLQ jobs are accessible via `GET /jobs/dlq` |
+| DLQ replay | Jobs can be replayed with lineage metadata preserved |
+
+Tests follow a **black-box integration testing** model — they interact only via API endpoints and do not depend on internal implementation details. This ensures stability during refactoring and validates real-world system guarantees.
+
+---
+
+## Configuration
+
+All infrastructure configuration is externalized via environment variables.
 
 ### Environment Variables
 
 ```bash
-REDIS_URL=<redis connection url>
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# Admin Dashboard
+ADMIN_USER=<username>
+ADMIN_PASSWORD=<password>
 ```
 
-During local development, this value is stored in a `.env` file and loaded using `dotenv`.
+During local development, values are stored in a `.env` file and loaded by `dotenv`. No credentials are hardcoded or committed to version control.
 
-**Security Note:** No credentials are hardcoded or committed to version control.
-
----
-
-## 🚀 Getting Started
-
-See `STARTUP.md` for detailed setup and run instructions.
-
-### Quick Start
-
-1. Clone the repository
-2. Install dependencies: `npm install`
-3. Configure environment variables in `.env`
-4. Start Redis (or use a managed Redis service)
-5. Run the system: `npm run dev`
+Copy `.env.example` to `.env` and fill in your values before starting.
 
 ---
 
-## 📁 Project Structure
+## Getting Started
+
+### Option A — Docker (Recommended)
+
+```bash
+# Clone the repository
+git clone <repo-url>
+cd <repo-name>
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your values
+
+# Start the full system
+docker compose up
+
+# Scale workers (optional)
+docker compose up --scale worker=3
+```
+
+### Option B — Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Configure environment
+cp .env.example .env
+# Edit .env — ensure REDIS_URL points to a running Redis instance
+
+# Start Redis (if running locally)
+# e.g. redis-server or via Docker: docker run -p 6379:6379 redis
+
+# Start API + Worker + Scheduler concurrently
+npm run dev
+```
+
+**Testing with Postman:** During development, Postman is the recommended client for simulating job submissions and inspecting responses.
+
+See `STARTUP.md` for full setup details.
+
+---
+
+## Project Structure
 
 ```
 .
 ├── src/
-│   ├── api/          # Express API server
-│   ├── worker/       # Job consumer/processor
-│   ├── scheduler/    # Scheduled job producer
-│   └── queue/        # BullMQ queue configuration
-├── .env.example      # Environment variable template
-├── PROJECT_CONTEXT.md # Architectural decisions and history
-├── README.md         # This file
-└── STARTUP.md        # Detailed setup instructions
+│   ├── api/              # Express API server (producer)
+│   │   └── jobSchemas.js # Zod validation schemas
+│   ├── worker/           # Job consumer / processor
+│   ├── scheduler/        # Scheduled job producer
+│   └── queue/            # BullMQ queue configuration & registry
+├── .github/
+│   └── workflows/
+│       └── ci.yml        # GitHub Actions CI pipeline
+├── Dockerfile            # Node.js application container
+├── docker-compose.yml    # Multi-service orchestration
+├── .dockerignore
+├── .env.example          # Environment variable template
+├── PROJECT_CONTEXT.md    # Architectural decisions and history
+├── README.md             # This file
+└── STARTUP.md            # Detailed setup instructions
 ```
 
 ---
 
-## 🎓 Learning Outcomes
+## Learning Outcomes
 
 This project demonstrates:
 
-- How to build reliable asynchronous systems
-- Producer-consumer pattern implementation
-- Idempotent API design
-- Retry and backoff strategies
-- State management with Redis
-- Process isolation and fault tolerance
-- Scheduled task execution
-- Clean architecture principles
+- How to build reliable, decoupled asynchronous systems
+- Producer–consumer pattern implementation with Redis and BullMQ
+- Idempotent API design and safety under retries
+- Retry, backoff, and dead-letter queue strategies
+- At-most-once side effect execution using Redis reservation
+- Structured observability: logging, metrics, and dashboards
+- Multi-queue workload isolation and per-queue rate limiting
+- Graceful shutdown for safe distributed deployments
+- Containerisation with Docker and multi-service orchestration
+- Black-box integration testing in a CI pipeline
+- Clean architecture with strict separation of producers, consumers, and infrastructure
 
 ---
 
-## 📝 License
+## License
 
 This project is intended for educational and demonstration purposes.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-This is a learning project. Feel free to fork and experiment with different job types, queue configurations, and scaling strategies.
+This is a learning project. Feel free to fork and experiment with different job types, queue configurations, scaling strategies, and observability tooling.
 
 ---
 
-**Built with ❤️ to demonstrate production-grade background job processing**
+*Built to demonstrate production-grade background job processing — from a simple async queue all the way to an observable, containerised, CI-validated distributed platform.*
