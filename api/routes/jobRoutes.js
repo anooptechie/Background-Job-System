@@ -1,14 +1,15 @@
 const express = require("express");
+const rateLimiter = require("../middleware/rateLimiter");
 const {
   createJob,
   getJobStatus,
   getDLQJobs,
-  replayDLQJob
+  replayDLQJob,
 } = require("../controllers/jobController");
 
 const router = express.Router();
 
-router.post("/", createJob);
+router.post("/", rateLimiter, createJob);
 router.get("/dlq", getDLQJobs);
 
 router.get("/:id/status", getJobStatus);
