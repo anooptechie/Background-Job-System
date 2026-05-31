@@ -7,16 +7,19 @@ const { z } = require("zod");
 const welcomeEmailSchema = z.object({
   email: z.string().email(),
   forceFail: z.boolean().optional(),
+  crashAfterSideEffect: z.boolean().optional(),
 });
 
 const generateReportSchema = z.object({
   reportType: z.string().min(1),
   forceFail: z.boolean().optional(),
+  crashAfterSideEffect: z.boolean().optional(),
 });
 
 const cleanupTempSchema = z.object({
   directory: z.string().min(1),
   forceFail: z.boolean().optional(),
+  crashAfterSideEffect: z.boolean().optional(),
 });
 
 /* ===============================

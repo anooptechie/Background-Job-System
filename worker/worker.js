@@ -93,6 +93,12 @@ async function processJob(job) {
     return;
   }
 
+  // 👇 Add this block
+  if (job.data?.crashAfterSideEffect === true) {
+    logger.warn({ jobId: job.id }, "job.crash_after_side_effect");
+    throw new Error("Crash after side effect");
+  }
+
   logger.info({ jobId: job.id }, "job.side_effect_started");
 
   if (job.name === "welcome-email") {

@@ -13,6 +13,6 @@ router.post("/", rateLimiter, createJob);
 router.get("/dlq", getDLQJobs);
 
 router.get("/:id/status", getJobStatus);
-router.post("/dlq/:id/replay", replayDLQJob);
+router.post("/dlq/:id/replay", rateLimiter, replayDLQJob);
 
 module.exports = router;
